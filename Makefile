@@ -1,5 +1,5 @@
 # pico-instal.sh is actual a wrapper script for the following command:
-# openocd -f interface/cmsis-dap.cfg -c "adapter speed 5000" -f target/rp2040.cfg -s tcl -c "program hidremote.elf verify reset exit"
+# openocd -f interface/cmsis-dap.cfg -c "adapter speed 5000" -f target/rp2040.cfg -s tcl -c "program hfp_746.elf verify reset exit"
 
 .PHONY: build clean debug install-debug install
 
@@ -23,10 +23,10 @@ clean:
 	rm -rf bt-debug
 
 install: build
-	cd build && pico-install.sh hidremote
+	cd build && pico-install.sh hfp_746
 
 install-debug: debug
-	cd debug && pico-install.sh hidremote
+	cd debug && pico-install.sh hfp_746
 
 install-bt-debug: bt-debug
-	cd bt-debug && pico-install.sh hidremote
+	cd bt-debug && pico-install.sh hfp_746

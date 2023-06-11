@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.13)
 include(pico_sdk_import.cmake)
-include(pico_extras_import_optional.cmake)
 
-project(hidremote VERSION 0.1 LANGUAGES C CXX ASM)
+project(hfp_746 VERSION 0.1 LANGUAGES C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
@@ -15,10 +14,11 @@ add_compile_options(-Wall
         )
 
 add_executable(hfp_746
+    hfp_746.c
 )
 
-pico_enable_stdio_usb(hidremote 0)
-pico_enable_stdio_uart(hidremote 1)
+pico_enable_stdio_usb(hfp_746 0)
+pico_enable_stdio_uart(hfp_746 1)
 
 # pull in common dependencies
 target_link_libraries(hfp_746
@@ -28,16 +28,19 @@ target_link_libraries(hfp_746
     pico_btstack_cyw43
     pico_cyw43_arch_none
     hardware_adc
+    hardware_dma
+    hardware_sync
+    hardware_spi
     )
 
 if(DEFINED ENV{DEBUG_MODE})
-    target_compile_definitions(hidremote PUBLIC
+    target_compile_definitions(hfp_746 PUBLIC
         DEBUG_MODE
     )
 endif()
 
 if(DEFINED ENV{BT_DEBUG_MODE})
-    target_compile_definitions(hidremote PUBLIC
+    target_compile_definitions(hfp_746 PUBLIC
         ENABLE_LOG_DEBUG
         ENABLE_LOG_INFO
         ENABLE_LOG_ERROR
@@ -45,8 +48,8 @@ if(DEFINED ENV{BT_DEBUG_MODE})
     )
 endif()
 
-target_include_directories(hidremote PRIVATE
+target_include_directories(hfp_746 PRIVATE
     ${CMAKE_CURRENT_LIST_DIR} # For btstack config
     )
 
-pico_add_extra_outputs(hidremote)
+pico_add_extra_outputs(hfp_746)

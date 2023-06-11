@@ -23,3 +23,6 @@ Firmware and hardware related resources to add hands-free bluetooth support to a
 Via pico probe:
 
     make install
+    
+BTN1: 21
+BTN2: 17
