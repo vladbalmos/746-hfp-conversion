@@ -12,9 +12,8 @@
 #define BIT_RATE 10
 
 #define MAX_SAMPLES 255
-#define MAX_SINE_VALUE ((1 << 10) / 2) - 1
 #define PI 3.14159265
-#define SAMPLE_RATE 8000
+#define SAMPLE_RATE 44100
 
 #define SPI_PORT spi0
 #define SCLK 2
@@ -23,6 +22,7 @@
 
 int16_t sine_wave[MAX_SAMPLES];
 uint16_t biased_sine_wave[MAX_SAMPLES];
+const uint16_t MAX_SINE_VALUE = ((1 << 10) / 2) - 1;
 
 void print_binary(uint16_t n) {
     for (int i = 15; i >= 0; i--) {
@@ -58,6 +58,7 @@ uint16_t generate_sine_wave(uint16_t frequency, int16_t *buffer) {
         buffer[i] = round(sine_val * MAX_SINE_VALUE);
     }
     
+    
     return samples;
 }
 
@@ -72,7 +73,7 @@ int main() {
     
 
     // Init SPI
-    spi_init(SPI_PORT, 500000);
+    spi_init(SPI_PORT, 1000000);
     spi_set_format(SPI_PORT, 16, 0, 0, SPI_MSB_FIRST);
     gpio_set_function(MOSI, GPIO_FUNC_SPI);
     gpio_set_function(SCLK, GPIO_FUNC_SPI);
@@ -82,44 +83,27 @@ int main() {
     gpio_set_dir(CS, GPIO_OUT);
     gpio_put(CS, 1);
     
-    uint16_t freq = 440;
+    uint16_t freq = 1000;
     
     uint16_t samples_num = generate_sine_wave(freq, sine_wave);
-    printf("Generated %d samples for %dhz@%dkhz\n", samples_num, freq, SAMPLE_RATE / 1000);
+    printf("Generated %d samples for %dhz@%dkhz. Max sine value: %d\n", samples_num, freq, SAMPLE_RATE / 1000, MAX_SINE_VALUE - 1);
     
     for (uint16_t i = 0; i < samples_num; i++) {
         int16_t sample = sine_wave[i];
         biased_sine_wave[i] = sample + MAX_SINE_VALUE;
-        printf("%d %d |", sample, biased_sine_wave[i]);
+        printf("%d |", sample, biased_sine_wave[i] << 2);
     }
     
     printf("\n");
  
-    for (uint16_t i = 0; i < samples_num; i++) {
-        int16_t sample = sine_wave[i];
-        printf("%f %f |", voltage_5(sample, BIT_RATE), voltage_5(biased_sine_wave[i], BIT_RATE));
-    }
-    printf("\n");
-    
     while (true) {
-        absolute_time_t last_sent = nil_time;
-        absolute_time_t now;
-        
-        uint i = 0;
-        
-        while (i < samples_num) {
-            now = get_absolute_time();
-            uint32_t diff = absolute_time_diff_us(last_sent, now);
-            if (diff >= 125) {
-                uint16_t spi_samples[1] = {biased_sine_wave[i] << 2}; // 10 bit conversion
-                
-                gpio_put(CS, 0);
-                spi_write16_blocking(SPI_PORT, spi_samples, 1);
-                gpio_put(CS, 1);
-                i++;
-                last_sent = now;
-            }
-            sleep_us(5);
+        for (uint i = 0; i < samples_num; i++) {
+            uint16_t spi_samples[1] = {biased_sine_wave[i] << 2}; // 10 bit conversion
+            
+            gpio_put(CS, 0);
+            spi_write16_blocking(SPI_PORT, spi_samples, 1);
+            gpio_put(CS, 1);
+            sleep_us(4.6);
         }
     }
 }
