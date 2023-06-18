@@ -14,6 +14,8 @@ add_compile_options(-Wall
         )
 
 add_executable(hfp_746
+    utils.c
+    dac.c
     hfp_746.c
 )
 
