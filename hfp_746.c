@@ -6,6 +6,7 @@
 #include "hardware/adc.h"
 #include "hardware/sync.h"
 #include "hardware/spi.h"
+#include "bt.h"
 #include "dac.h"
 #include "utils.h"
 #include "debug.h"
@@ -26,27 +27,33 @@ const uint16_t MAX_SINE_VALUE = ((1 << BIT_RATE) / 2) - 1;
 
 int main() {
     stdio_init_all();
-
-    // Init Bluetooth chipset
     if (cyw43_arch_init()) {
-        printf("failed to initialise cyw43_arch\n");
+        printf("Failed to initialise cyw43_arch\n");
         return -1;
     }
     
-    // Initi DAC
+    // Init DAC
     dac_init(spi0, MOSI, SCLK, CS);
-
-    uint16_t freq = 220;
     
+    // Init Bluetooth
+    bt_init();
+
+    uint16_t freq = 1000;
     uint16_t samples_num = utils_generate_sine_wave(freq, sine_wave_buffer, SAMPLE_RATE_HZ, MAX_SINE_VALUE);
     utils_sine_wave_for_tlc5615(sine_wave_buffer, dac_data, samples_num);
 
     printf("Generated %d samples for %dhz@%dkhz. Max sine value: %d\n", samples_num, freq, SAMPLE_RATE_HZ / 1000, MAX_SINE_VALUE);
     
+    // dac_setup_streaming(dac_data, samples_num);
+    // dac_start_streaming();
+
+    printf("Streaming data\n");
+    
     while (true) {
-        for (uint i = 0; i < samples_num; i++) {
-            dac_single_write(dac_data[i]);
-            sleep_us(4.6);
-        }
+        __wfe();
+        // for (uint i = 0; i < samples_num; i++) {
+        //     dac_single_write(dac_data[i]);
+        //     sleep_us(4.6);
+        // }
     }
 }
