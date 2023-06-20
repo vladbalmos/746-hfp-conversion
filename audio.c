@@ -44,6 +44,7 @@
  *
  */
 
+#include <stdio.h>
 #include "btstack_config.h"
 
 #include "btstack_debug.h"

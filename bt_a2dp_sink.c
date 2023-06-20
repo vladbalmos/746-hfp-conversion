@@ -81,14 +81,6 @@ typedef struct {
 } a2dp_sink_demo_a2dp_connection_t;
 static a2dp_sink_demo_a2dp_connection_t a2dp_sink_demo_a2dp_connection;
 
-static void hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size);
-static void a2dp_sink_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t * packet, uint16_t event_size);
-static void handle_l2cap_media_data_packet(uint8_t seid, uint8_t *packet, uint16_t size);
-static int media_processing_init(media_codec_configuration_sbc_t * configuration);
-static void media_processing_start(void);
-static void media_processing_pause(void);
-static void media_processing_close(void);
-
 /* @section Handle Media Data Packet 
  *
  * @text Here the audio data, are received through the handle_l2cap_media_data_packet callback.
@@ -99,6 +91,20 @@ static void media_processing_close(void);
 
 static int read_media_data_header(uint8_t * packet, int size, int * offset, avdtp_media_packet_header_t * media_header);
 static int read_sbc_header(uint8_t * packet, int size, int * offset, avdtp_sbc_codec_header_t * sbc_header);
+
+// Handles pairing & connecting
+static void hci_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet, uint16_t size);
+
+// Handles a2dp info
+static void a2dp_sink_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t * packet, uint16_t event_size);
+
+// Actual audio data
+static void handle_l2cap_media_data_packet(uint8_t seid, uint8_t *packet, uint16_t size);
+static int media_processing_init(media_codec_configuration_sbc_t * configuration);
+static void media_processing_start(void);
+static void media_processing_pause(void);
+static void media_processing_close(void);
+
 
 static void dump_sbc_configuration(media_codec_configuration_sbc_t * configuration){
     printf("    - num_channels: %d\n", configuration->num_channels);
