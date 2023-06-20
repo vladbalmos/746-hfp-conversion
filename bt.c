@@ -273,6 +273,9 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t * even
 }
 
 void bt_init() {
+    gap_secure_connections_enable(false);
+    hci_set_sco_voice_setting(0x60);    // linear, unsigned, 16-bit, CVSD
+                                        
     gap_discoverable_control(1);
     gap_set_class_of_device(0x200408);   
     gap_set_local_name("746 Headset 00:00:00:00:00:00");

@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.13)
 include(pico_sdk_import.cmake)
+include(pico_extras_import_optional.cmake)
 
 project(hfp_746 VERSION 0.1 LANGUAGES C CXX ASM)
 set(CMAKE_C_STANDARD 11)
@@ -13,10 +14,19 @@ add_compile_options(-Wall
         -Wno-maybe-uninitialized
         )
 
+add_library(pico_btstack_audio INTERFACE)
+target_sources(pico_btstack_audio INTERFACE
+        ${PICO_BTSTACK_PATH}/src/btstack_audio.c
+        audio.c
+        )
+target_link_libraries(pico_btstack_audio INTERFACE
+        pico_audio_i2s
+        )
+
 add_executable(hfp_746
     utils.c
     dac.c
-    bt.c
+    bt_a2dp_sink.c
     hfp_746.c
 )
 
@@ -30,6 +40,8 @@ target_link_libraries(hfp_746
     pico_btstack_ble
     pico_btstack_classic
     pico_btstack_cyw43
+    pico_btstack_audio
+    pico_btstack_sbc_decoder
     pico_cyw43_arch_none
     hardware_adc
     hardware_dma

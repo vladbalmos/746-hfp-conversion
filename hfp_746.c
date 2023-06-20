@@ -6,7 +6,7 @@
 #include "hardware/adc.h"
 #include "hardware/sync.h"
 #include "hardware/spi.h"
-#include "bt.h"
+#include "bt_a2dp_sink.h"
 #include "dac.h"
 #include "utils.h"
 #include "debug.h"
@@ -46,8 +46,7 @@ int main() {
     
     // dac_setup_streaming(dac_data, samples_num);
     // dac_start_streaming();
-
-    printf("Streaming data\n");
+    // printf("Streaming data\n");
     
     while (true) {
         __wfe();
