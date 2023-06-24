@@ -44,7 +44,7 @@ int main() {
     // Init Bluetooth
     // bt_init();
 
-    uint16_t freq = 1000;
+    uint16_t freq = 440;
     uint16_t samples_num = utils_generate_sine_wave(freq, sine_wave_buffer, SAMPLE_RATE_HZ, MAX_SINE_VALUE);
 
     printf("Generated %d samples for %dhz@%dkhz. Max sine value: %d\n", samples_num, freq, SAMPLE_RATE_HZ / 1000, MAX_SINE_VALUE);
@@ -70,6 +70,7 @@ int main() {
             utils_sine_wave_for_tlc5615(sine_wave_buffer, buffer + buffer_used, max);
             buffer_used += max;
             buffer_free_length = buffer_length - buffer_used;
+            // TODO: resume sample copying from where it left of if buffer_free_length < samples_num
         }
         
         dac_audio_enqueue_ready_buffer(buf);

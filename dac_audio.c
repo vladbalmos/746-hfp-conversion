@@ -22,22 +22,33 @@ static int dma_data_chan;
 static dma_channel_config dma_data_cfg;
 
 static dac_audio_buffer_pool_t *buffer_pool = NULL;
+static uint8_t transfer_in_progress = 0;
 
 static void dma_handler() {
-    if (current_buffer) {
-        dac_audio_enqueue_free_buffer(current_buffer);
-    }
+    dac_audio_enqueue_free_buffer(current_buffer);
     // Clear the interrupt request.
     dma_hw->ints0 = 1u << dma_data_chan;
-}
-
-int64_t stream_buffers(alarm_id_t id, void *user_data) {
-    // TODO: fix timing issue
-    dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
     
+    dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
     if (buf != NULL) {
         current_buffer = buf;
         dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
+        return;
+    }
+    
+    transfer_in_progress = 0;
+}
+
+int64_t stream_buffers(alarm_id_t id, void *user_data) {
+    if (!transfer_in_progress) {
+        transfer_in_progress = 1;
+        dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
+
+        if (buf != NULL)
+        {
+            current_buffer = buf;
+            dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
+        }
     }
     add_alarm_in_ms(POLL_MS, stream_buffers, NULL, false);
     return 0;
