@@ -42,13 +42,15 @@ uint16_t utils_generate_sine_wave(uint16_t frequency, int16_t *buffer, uint samp
 
 void utils_bias_sine_wave(int16_t *src_buffer, uint16_t *dst_buffer, uint16_t samples_num, uint16_t bias) {
     for (uint16_t i = 0; i < samples_num; i++) {
-        dst_buffer[i] = src_buffer[i] + bias;
+        *dst_buffer = src_buffer[i] + bias;
+        dst_buffer++;
     }
 }
 
 void utils_sine_wave_for_tlc5615(int16_t *src_buffer, uint16_t *dst_buffer, uint16_t samples_num) {
     utils_bias_sine_wave(src_buffer, dst_buffer, samples_num, ((1 << 10) / 2) - 1);
     for (uint16_t i = 0; i < samples_num; i++) {
-        dst_buffer[i] = dst_buffer[i] << 2; // shift by 2 bits to make it compatible with TLC5615
+        *dst_buffer = *dst_buffer << 2; // shift by 2 bits to make it compatible with TLC5615
+        dst_buffer++;
     }
 }

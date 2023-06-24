@@ -118,17 +118,8 @@ static void dump_sbc_configuration(media_codec_configuration_sbc_t * configurati
 }
 
 /* LISTING_END */
-#ifdef HAVE_BTSTACK_AUDIO_EFFECTIVE_SAMPLERATE
-btstack_sample_rate_compensation_t sample_rate_compensation;
-#endif
-
 static void playback_handler(int16_t * buffer, uint16_t num_audio_frames){
 
-#ifdef STORE_TO_WAV_FILE
-    int       wav_samples = num_audio_frames * NUM_CHANNELS;
-    int16_t * wav_buffer  = buffer;
-#endif
-    
     // called from lower-layer but guaranteed to be on main thread
     if (sbc_frame_size == 0){
         memset(buffer, 0, num_audio_frames * BYTES_PER_FRAME);
@@ -150,11 +141,6 @@ static void playback_handler(int16_t * buffer, uint16_t num_audio_frames){
         btstack_ring_buffer_read(&sbc_frame_ring_buffer, sbc_frame, sbc_frame_size, &bytes_read);
         btstack_sbc_decoder_process_data(&state, 0, sbc_frame, sbc_frame_size);
     }
-
-#ifdef STORE_TO_WAV_FILE
-    audio_frame_count += num_audio_frames;
-    wav_writer_write_int16(wav_samples, wav_buffer);
-#endif
 }
 
 static void handle_pcm_data(int16_t * data, int num_audio_frames, int num_channels, int sample_rate, void * context){
@@ -164,10 +150,6 @@ static void handle_pcm_data(int16_t * data, int num_audio_frames, int num_channe
 
     const btstack_audio_sink_t * audio_sink = btstack_audio_sink_get_instance();
     if (!audio_sink){
-#ifdef STORE_TO_WAV_FILE
-        audio_frame_count += num_audio_frames;
-        wav_writer_write_int16(num_audio_frames * NUM_CHANNELS, data);
-#endif
         return;
     }
 
@@ -387,14 +369,7 @@ static void a2dp_sink_packet_handler(uint8_t packet_type, uint16_t channel, uint
 
 static int media_processing_init(media_codec_configuration_sbc_t * configuration){
     if (media_initialized) return 0;
-#ifdef HAVE_BTSTACK_AUDIO_EFFECTIVE_SAMPLERATE
-    btstack_sample_rate_compensation_init( &sample_rate_compensation, btstack_run_loop_get_time_ms(), configuration->sampling_frequency, FLOAT_TO_Q15(1.f) );
-#endif
     btstack_sbc_decoder_init(&state, mode, handle_pcm_data, NULL);
-
-#ifdef STORE_TO_WAV_FILE
-    wav_writer_open(wav_filename, configuration->num_channels, configuration->sampling_frequency);
-#endif
 
     btstack_ring_buffer_init(&sbc_frame_ring_buffer, sbc_frame_storage, sizeof(sbc_frame_storage));
     btstack_ring_buffer_init(&decoded_audio_ring_buffer, decoded_audio_storage, sizeof(decoded_audio_storage));
@@ -413,9 +388,6 @@ static int media_processing_init(media_codec_configuration_sbc_t * configuration
 
 static void media_processing_start(void){
     if (!media_initialized) return;
-#ifdef HAVE_BTSTACK_AUDIO_EFFECTIVE_SAMPLERATE
-    btstack_sample_rate_compensation_reset( &sample_rate_compensation, btstack_run_loop_get_time_ms() );
-#endif
     // setup audio playback
     const btstack_audio_sink_t * audio = btstack_audio_sink_get_instance();
     if (audio){
@@ -443,14 +415,6 @@ static void media_processing_close(void){
     audio_stream_started = 0;
     sbc_frame_size = 0;
 
-#ifdef STORE_TO_WAV_FILE                 
-    wav_writer_close();
-    uint32_t total_frames_nr = state.good_frames_nr + state.bad_frames_nr + state.zero_frames_nr;
-
-    printf("WAV Writer: Decoding done. Processed %u SBC frames:\n - %d good\n - %d bad\n", total_frames_nr, state.good_frames_nr, total_frames_nr - state.good_frames_nr);
-    printf("WAV Writer: Wrote %u audio frames to wav file: %s\n", audio_frame_count, wav_filename);
-#endif
-
     // stop audio playback
     const btstack_audio_sink_t * audio = btstack_audio_sink_get_instance();
     if (audio){
@@ -475,8 +439,6 @@ static void handle_l2cap_media_data_packet(uint8_t seid, uint8_t *packet, uint16
         btstack_sbc_decoder_process_data(&state, 0, packet+pos, size-pos);
         return;
     }
-
-
     // store sbc frame size for buffer management
     sbc_frame_size = (size-pos)/ sbc_header.num_frames;
         
@@ -487,30 +449,29 @@ static void handle_l2cap_media_data_packet(uint8_t seid, uint8_t *packet, uint16
 
     // decide on audio sync drift based on number of sbc frames in queue
     int sbc_frames_in_buffer = btstack_ring_buffer_bytes_available(&sbc_frame_ring_buffer) / sbc_frame_size;
-#ifdef HAVE_BTSTACK_AUDIO_EFFECTIVE_SAMPLERATE
-    // update sample rate compensation
-    if( audio_stream_started && (audio != NULL)) {
-        uint32_t resampling_factor = btstack_sample_rate_compensation_update( &sample_rate_compensation, btstack_run_loop_get_time_ms(), sbc_header.num_frames*128, audio->get_samplerate() );
-        btstack_resample_set_factor(&resample_instance, resampling_factor);
-//        printf("sbc buffer level :            %d\n", btstack_ring_buffer_bytes_available(&sbc_frame_ring_buffer));
-    }
-#else
+
     uint32_t resampling_factor;
 
     // nominal factor (fixed-point 2^16) and compensation offset
     uint32_t nominal_factor = 0x10000;
     uint32_t compensation   = 0x00100;
+    uint8_t show = 0;
 
     if (sbc_frames_in_buffer < OPTIMAL_FRAMES_MIN){
     	resampling_factor = nominal_factor - compensation;    // stretch samples
+        show = 1;
     } else if (sbc_frames_in_buffer <= OPTIMAL_FRAMES_MAX){
     	resampling_factor = nominal_factor;                   // nothing to do
     } else {
+        show = 1;
     	resampling_factor = nominal_factor + compensation;    // compress samples
     }
+    
+    // if (show) {
+    //     printf("%d %d %d\n", resampling_factor, nominal_factor, sbc_frames_in_buffer);
+    // }
 
     btstack_resample_set_factor(&resample_instance, resampling_factor);
-#endif
     // start stream if enough frames buffered
     if (!audio_stream_started && sbc_frames_in_buffer >= OPTIMAL_FRAMES_MIN){
         media_processing_start();
