@@ -31,6 +31,7 @@ static void dma_handler() {
     
     dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
     if (buf != NULL) {
+        // TODO: sync end of transfer with start of new transfer
         current_buffer = buf;
         dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
         return;

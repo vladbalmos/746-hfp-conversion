@@ -36,7 +36,7 @@ int main() {
     }
     
 
-    pool = dac_audio_init_buffer_pool(3, 512);
+    pool = dac_audio_init_buffer_pool(9, 25);
 
     // Init DAC
     dac_audio_init(spi0, MOSI, SCLK, CS);
@@ -44,13 +44,16 @@ int main() {
     // Init Bluetooth
     // bt_init();
 
-    uint16_t freq = 440;
+    uint16_t freq = 1000;
     uint16_t samples_num = utils_generate_sine_wave(freq, sine_wave_buffer, SAMPLE_RATE_HZ, MAX_SINE_VALUE);
 
     printf("Generated %d samples for %dhz@%dkhz. Max sine value: %d\n", samples_num, freq, SAMPLE_RATE_HZ / 1000, MAX_SINE_VALUE);
     
     dac_audio_start_streaming();
     printf("Streaming data\n");
+    
+    uint16_t sine_wave_index = 0;
+    uint16_t sine_wave_read_total = 0;
     
     while (true) {
         dac_audio_buffer_t *buf = dac_audio_take_free_buffer();
@@ -67,12 +70,30 @@ int main() {
         
         while (buffer_free_length > 0) {
             uint16_t max = (samples_num < buffer_free_length) ? samples_num : buffer_free_length;
-            utils_sine_wave_for_tlc5615(sine_wave_buffer, buffer + buffer_used, max);
-            buffer_used += max;
+            printf("Starting at %d, max samples %d. Available buffer size: %d. ", sine_wave_index, max, buffer_free_length);
+            uint16_t x = utils_sine_wave_for_tlc5615(sine_wave_buffer, buffer + buffer_used, samples_num, max, sine_wave_index);
+            sine_wave_read_total += x;
+            
+            if (max < samples_num && sine_wave_read_total != samples_num) {
+                sine_wave_index = max;
+            } else {
+                sine_wave_index = 0;
+                sine_wave_read_total = 0;
+            }
+
+            buffer_used += x;
             buffer_free_length = buffer_length - buffer_used;
-            // TODO: resume sample copying from where it left of if buffer_free_length < samples_num
+            printf("Copied samples: %d, buffer_used: %d. buffer_free_length: %d\n", x, buffer_used, buffer_free_length);
         }
         
-        dac_audio_enqueue_ready_buffer(buf);
+        for (int i = 0; i < buffer_length; i++) {
+            if (i && (i % samples_num == 0)) {
+                printf(", ");
+            }
+            printf("%d ", buffer[i]);
+        }
+        printf("\n=============================\n");
+        
+        // dac_audio_enqueue_ready_buffer(buf);
     }
 }
