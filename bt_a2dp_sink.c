@@ -1,12 +1,12 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
-#include "btstack_audio.h"
+#include "bt_audio.h"
 #include "btstack_resample.h"
 #include "btstack_sample_rate_compensation.h"
 #include "btstack_ring_buffer.h"
 #include "btstack.h"
 
-#define NUM_CHANNELS 2
+#define NUM_CHANNELS 1
 #define BYTES_PER_FRAME     (2*NUM_CHANNELS)
 #define MAX_SBC_FRAME_SIZE 120
 
@@ -17,7 +17,8 @@ static uint8_t  device_id_sdp_service_buffer[100];
 
 // we support all configurations with bitpool 2-53
 static uint8_t media_sbc_codec_capabilities[] = {
-    0xFF,//(AVDTP_SBC_44100 << 4) | AVDTP_SBC_STEREO,
+    // 0xFF,//(AVDTP_SBC_44100 << 4) | AVDTP_SBC_STEREO,
+    (15 << 4) | AVDTP_SBC_MONO,
     0xFF,//(AVDTP_SBC_BLOCK_LENGTH_16 << 4) | (AVDTP_SBC_SUBBANDS_8 << 2) | AVDTP_SBC_ALLOCATION_METHOD_LOUDNESS,
     2, 53
 };
@@ -129,9 +130,10 @@ static void playback_handler(int16_t * buffer, uint16_t num_audio_frames){
     // first fill from resampled audio
     uint32_t bytes_read;
     btstack_ring_buffer_read(&decoded_audio_ring_buffer, (uint8_t *) buffer, num_audio_frames * BYTES_PER_FRAME, &bytes_read);
+
     buffer          += bytes_read / NUM_CHANNELS;
     num_audio_frames   -= bytes_read / BYTES_PER_FRAME;
-
+    
     // then start decoding sbc frames using request_* globals
     request_buffer = buffer;
     request_frames = num_audio_frames;
@@ -233,7 +235,8 @@ void bt_init() {
     // Register for HCI events
     hci_event_callback_registration.callback = &hci_packet_handler;
     hci_add_event_handler(&hci_event_callback_registration);
-    btstack_audio_sink_set_instance(btstack_audio_pico_sink_get_instance());
+    btstack_audio_sink_set_instance(bt_audio_sink_get_instance());
+    // btstack_audio_sink_set_instance(btstack_audio_pico_sink_get_instance());
 
     if (!btstack_audio_sink_get_instance()){
         printf("No audio playback.\n");
@@ -444,7 +447,7 @@ static void handle_l2cap_media_data_packet(uint8_t seid, uint8_t *packet, uint16
         
     int status = btstack_ring_buffer_write(&sbc_frame_ring_buffer, packet+pos, size-pos);
     if (status != ERROR_CODE_SUCCESS){
-        printf("Error storing samples in SBC ring buffer!!!\n");
+        // printf("Error storing samples in SBC ring buffer!!!\n");
     }
 
     // decide on audio sync drift based on number of sbc frames in queue
@@ -455,22 +458,15 @@ static void handle_l2cap_media_data_packet(uint8_t seid, uint8_t *packet, uint16
     // nominal factor (fixed-point 2^16) and compensation offset
     uint32_t nominal_factor = 0x10000;
     uint32_t compensation   = 0x00100;
-    uint8_t show = 0;
 
     if (sbc_frames_in_buffer < OPTIMAL_FRAMES_MIN){
     	resampling_factor = nominal_factor - compensation;    // stretch samples
-        show = 1;
     } else if (sbc_frames_in_buffer <= OPTIMAL_FRAMES_MAX){
     	resampling_factor = nominal_factor;                   // nothing to do
     } else {
-        show = 1;
     	resampling_factor = nominal_factor + compensation;    // compress samples
     }
     
-    // if (show) {
-    //     printf("%d %d %d\n", resampling_factor, nominal_factor, sbc_frames_in_buffer);
-    // }
-
     btstack_resample_set_factor(&resample_instance, resampling_factor);
     // start stream if enough frames buffered
     if (!audio_stream_started && sbc_frames_in_buffer >= OPTIMAL_FRAMES_MIN){

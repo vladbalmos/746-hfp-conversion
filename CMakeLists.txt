@@ -17,7 +17,8 @@ add_compile_options(-Wall
 add_library(pico_btstack_audio INTERFACE)
 target_sources(pico_btstack_audio INTERFACE
         ${PICO_BTSTACK_PATH}/src/btstack_audio.c
-        audio.c
+        bt_audio.c
+        # audio.c
         )
 target_link_libraries(pico_btstack_audio INTERFACE
         pico_audio_i2s

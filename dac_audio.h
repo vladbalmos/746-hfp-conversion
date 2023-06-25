@@ -1,7 +1,7 @@
 #include "pico/stdlib.h"
 
 typedef struct dac_audio_buffer {
-    uint8_t *bytes;
+    int8_t *bytes;
     uint16_t size;
     struct dac_audio_buffer *next;
     

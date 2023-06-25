@@ -118,7 +118,9 @@ static void btstack_audio_pico_sink_fill_buffers(void){
         }
 
         int16_t * buffer16 = (int16_t *) audio_buffer->buffer->bytes;
+        printf("Getting data %p %d\n", audio_buffer->buffer->bytes, audio_buffer->max_sample_count);
         (*playback_callback)(buffer16, audio_buffer->max_sample_count);
+        printf("Got data %p\n", audio_buffer->buffer->bytes);
 
         // duplicate samples for mono
         if (btstack_audio_pico_channel_count == 1){

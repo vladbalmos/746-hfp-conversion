@@ -12,6 +12,6 @@ double utils_voltage_5(int16_t sample, uint16_t bitrate);
  */
 uint16_t utils_generate_sine_wave(uint16_t frequency, int16_t *buffer, uint sample_rate, uint16_t max_sine_value);
 
-uint16_t utils_bias_sine_wave(int16_t *src_buffer, uint16_t *dst_buffer, uint16_t src_buffer_length, uint16_t samples_num, uint16_t bias, uint16_t start_at);
+uint16_t utils_bias_audio(int16_t *src_buffer, uint16_t *dst_buffer, uint16_t src_buffer_length, uint16_t samples_num, uint16_t bias, uint16_t start_at);
 
-uint16_t utils_sine_wave_for_tlc5615(int16_t *src_buffer, uint16_t *dst_buffer, uint16_t src_buffer_length, uint16_t samples_num, uint16_t start_at);
+uint16_t utils_prepare_audio_for_tlc5615(int16_t *src_buffer, uint16_t *dst_buffer, uint16_t src_buffer_length, uint16_t samples_num, uint16_t start_at);

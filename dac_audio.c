@@ -46,6 +46,7 @@ static void dac_single_write(uint16_t val) {
 }
 
 static void dma_handler() {
+    DEBUG("Freed ready buffer %p\n", current_buffer->bytes)
     dac_audio_enqueue_free_buffer(current_buffer);
     // Clear the interrupt request.
     dma_hw->ints0 = 1u << dma_data_chan;
@@ -57,6 +58,7 @@ static void dma_handler() {
     
     dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
     if (buf != NULL) {
+        DEBUG("Got ready buffer %p\n", buf->bytes);
         current_buffer = buf;
         dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
         return;
@@ -73,6 +75,7 @@ int64_t stream_buffers(alarm_id_t id, void *user_data) {
         dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
 
         if (buf != NULL) {
+            DEBUG("Got ready buffer %p\n", buf->bytes);
             current_buffer = buf;
             dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
         } else {
@@ -84,7 +87,7 @@ int64_t stream_buffers(alarm_id_t id, void *user_data) {
 }
 
 static dac_audio_buffer_t *init_audio_buffer(uint16_t buffer_size) {
-    uint8_t *bytes = malloc(buffer_size * sizeof(uint16_t));
+    int8_t *bytes = malloc(buffer_size * sizeof(uint16_t));
     dac_audio_buffer_t *audio_buffer = malloc(sizeof(dac_audio_buffer_t));
     
     if (bytes == NULL) {
@@ -181,6 +184,10 @@ void dac_audio_stop_streaming() {
 
 dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, uint16_t buffer_size) {
     buffer_pool = malloc(sizeof(dac_audio_buffer_pool_t));
+    
+    if (buffer_pool == NULL) {
+        return NULL;
+    }
     buffer_pool->free_buffers_queue_head = NULL;
     buffer_pool->free_buffers_queue_tail = NULL;
     buffer_pool->ready_buffers_queue_head = NULL;
