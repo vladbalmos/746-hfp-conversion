@@ -27,10 +27,12 @@ typedef enum {
 
 void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs, dac_audio_sample_rate_t sample_rate);
 void dac_audio_start_streaming();
+void dac_audio_stop_streaming();
 
 dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, uint16_t buffer_size);
 dac_audio_buffer_t *dac_audio_take_free_buffer();
 dac_audio_buffer_t *dac_audio_take_ready_buffer();
+uint16_t dac_audio_get_sample_rate();
 uint8_t dac_audio_remaining_free_buffer_slots();
 uint8_t dac_audio_remaining_ready_buffer_slots();
 uint8_t dac_audio_enqueue_ready_buffer(dac_audio_buffer_t *buffer);

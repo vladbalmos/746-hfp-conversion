@@ -11,20 +11,18 @@
 #include "utils.h"
 #include "debug.h"
 
-#define MICRO_SLEEP_MS 1000
 #define BIT_RATE 10
-
 #define MAX_SAMPLES 1024
-// #define SAMPLE_RATE_HZ 44100
-#define SAMPLE_RATE_HZ 16000
 
 #define SCLK 2
 #define MOSI 3
 #define CS 5
 
+#define DAC_BUFFER_POOL_SIZE 3
+#define DAC_BUFFER_MAX_SAMPLES 512
+
 int16_t sine_wave_buffer[MAX_SAMPLES];
 uint16_t samples_num = 0;
-uint16_t dac_data[MAX_SAMPLES];
 const uint16_t MAX_SINE_VALUE = ((1 << BIT_RATE) / 2) - 1;
 dac_audio_buffer_pool_t *pool = NULL;
 
@@ -37,7 +35,7 @@ int main() {
     }
     
 
-    pool = dac_audio_init_buffer_pool(3, 512);
+    pool = dac_audio_init_buffer_pool(DAC_BUFFER_POOL_SIZE, DAC_BUFFER_MAX_SAMPLES);
 
     // Init DAC
     dac_audio_init(spi0, MOSI, SCLK, CS, DAC_SAMPLE_RATE_16KHZ);
@@ -45,10 +43,11 @@ int main() {
     // Init Bluetooth
     // bt_init();
 
-    uint16_t freq = 440;
-    uint16_t samples_num = utils_generate_sine_wave(freq, sine_wave_buffer, SAMPLE_RATE_HZ, MAX_SINE_VALUE);
+    uint16_t freq = 1000;
+    uint16_t sample_rate = dac_audio_get_sample_rate();
+    uint16_t samples_num = utils_generate_sine_wave(freq, sine_wave_buffer, sample_rate, MAX_SINE_VALUE);
 
-    printf("Generated %d samples for %dhz@%dkhz. Max sine value: %d\n", samples_num, freq, SAMPLE_RATE_HZ / 1000, MAX_SINE_VALUE);
+    printf("Generated %d samples for %dhz@%dkhz. Max sine value: %d\n", samples_num, freq, sample_rate / 1000, MAX_SINE_VALUE);
     
     dac_audio_start_streaming();
     printf("Streaming data\n");
@@ -63,7 +62,7 @@ int main() {
             __wfe();
             continue;
         }
-
+        
         uint16_t buffer_length = buf->size / sizeof(uint16_t);
         uint16_t buffer_used = 0;
         uint16_t *buffer = (uint16_t *) buf->bytes;
@@ -85,4 +84,5 @@ int main() {
         
         dac_audio_enqueue_ready_buffer(buf);
     }
+    return 0;
 }
