@@ -12,7 +12,7 @@
 
 #define SPI_BAUD_RATE_HZ 10 * 1000 * 1000
 
-static spi_inst_t *initialized_spi_port;
+static spi_inst_t *initialized_spi_port = NULL;
 static uint dma_timer_0 = 0;
 static uint8_t mosi_pin;
 static uint8_t clk_pin;
@@ -33,6 +33,12 @@ static uint16_t dreq_timer_fractions[2][3] = {
 static uint16_t current_sample_rate;
 static alarm_id_t stream_alarm;
 static uint8_t is_streaming = 0;
+
+static inline void ensure_initialization() {
+    if (initialized_spi_port == NULL) {
+        panic("DAC not initialized!\n");
+    }
+}
 
 static void dac_single_write(uint16_t val) {
     uint16_t data[1] = { val };
@@ -120,6 +126,9 @@ void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs,
     gpio_set_function(mosi_pin, GPIO_FUNC_SPI);
     gpio_set_function(clk_pin, GPIO_FUNC_SPI);
     gpio_set_function(cs_pin, GPIO_FUNC_SPI);
+    
+    // Silence please!
+    dac_single_write(0);
 
     dma_data_chan = dma_claim_unused_channel(true);
 
@@ -149,6 +158,7 @@ void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs,
 }
 
 void dac_audio_start_streaming() {
+    ensure_initialization();
     if (buffer_pool == NULL) {
         return;
     }
@@ -156,7 +166,6 @@ void dac_audio_start_streaming() {
     
     is_streaming = 1;
     stream_alarm = add_alarm_in_ms(POLL_MS, stream_buffers, NULL, false);
-    // stream_buffers(0, NULL);
 }
 
 void dac_audio_stop_streaming() {

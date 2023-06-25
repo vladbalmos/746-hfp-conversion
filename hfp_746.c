@@ -42,6 +42,9 @@ int main() {
     
     // Init Bluetooth
     // bt_init();
+    // while (true) {
+    //     __wfi();
+    // }
 
     uint16_t freq = 1000;
     uint16_t sample_rate = dac_audio_get_sample_rate();
