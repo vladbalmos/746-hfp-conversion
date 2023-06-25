@@ -82,7 +82,6 @@ int main() {
             buffer_free_length = buffer_length - buffer_used;
         }
         
-        
         dac_audio_enqueue_ready_buffer(buf);
     }
 }

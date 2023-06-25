@@ -31,7 +31,6 @@ static void dma_handler() {
     
     dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
     if (buf != NULL) {
-        // TODO: sync end of transfer with start of new transfer
         current_buffer = buf;
         dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
         return;
@@ -120,6 +119,9 @@ void dac_audio_start_streaming() {
     if (buffer_pool == NULL) {
         return;
     }
+    
+    // TODO: Handle stop streaming
+    // TODO: Handle silence (write 0 to dac)
     
     add_alarm_in_ms(POLL_MS, stream_buffers, NULL, false);
 }
