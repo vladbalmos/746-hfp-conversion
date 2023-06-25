@@ -20,8 +20,12 @@ typedef struct dac_audio_buffer_pool {
     uint16_t buffer_size;
 } dac_audio_buffer_pool_t;
 
+typedef enum {
+    DAC_SAMPLE_RATE_16KHZ,
+    DAC_SAMPLE_RATE_44KHZ,
+} dac_audio_sample_rate_t;
 
-void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs);
+void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs, dac_audio_sample_rate_t sample_rate);
 void dac_audio_start_streaming();
 
 dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, uint16_t buffer_size);

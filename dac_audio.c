@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
+#include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "hardware/dma.h"
 #include "hardware/spi.h"
@@ -12,7 +13,6 @@
 #define SPI_BAUD_RATE_HZ 10 * 1000 * 1000
 
 static uint dma_timer_0 = 0;
-static spi_inst_t *port;
 static uint8_t mosi_pin;
 static uint8_t clk_pin;
 static uint8_t cs_pin;
@@ -23,6 +23,11 @@ static dma_channel_config dma_data_cfg;
 
 static dac_audio_buffer_pool_t *buffer_pool = NULL;
 static uint8_t transfer_in_progress = 0;
+
+static uint16_t dreq_timer_fractions[2][3] = {
+    {8, 63000, 16000},
+    {23, 65535, 44100}
+};
 
 static void dma_handler() {
     dac_audio_enqueue_free_buffer(current_buffer);
@@ -72,12 +77,15 @@ static dac_audio_buffer_t *init_audio_buffer(uint16_t buffer_size) {
     return audio_buffer;
 }
 
-void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs) {
-    port = spi_port;
+void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs, dac_audio_sample_rate_t sample_rate) {
+    uint16_t dreq_timer_numerator = dreq_timer_fractions[sample_rate][0];
+    uint16_t dreq_timer_denominator = dreq_timer_fractions[sample_rate][1];
+    
+    printf("Using %d %d\n", dreq_timer_numerator, dreq_timer_denominator);
 
     // Init spi port and baud rate
-    spi_init(port, SPI_BAUD_RATE_HZ);
-    spi_set_format(port, 16, 0, 0, 0);
+    spi_init(spi_port, SPI_BAUD_RATE_HZ);
+    spi_set_format(spi_port, 16, 0, 0, 0);
     
     mosi_pin = mosi;
     clk_pin = clk;
@@ -95,8 +103,9 @@ void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs)
     channel_config_set_transfer_data_size(&dma_data_cfg, DMA_SIZE_16);
     channel_config_set_read_increment(&dma_data_cfg, true);
     channel_config_set_write_increment(&dma_data_cfg, false);
-    // SPI write at ~44.1khz
-    dma_timer_set_fraction(dma_timer_0, 0x0017, 0xffff);
+
+    // Set SPI write rate (must clossly match the audio sample rate)
+    dma_timer_set_fraction(dma_timer_0, dreq_timer_numerator, dreq_timer_denominator);
     channel_config_set_dreq(&dma_data_cfg, DREQ_DMA_TIMER0);
     
     printf("DMA transfer count: %d\n", buffer_pool->buffer_size);
@@ -104,7 +113,7 @@ void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs)
     dma_channel_configure(
         dma_data_chan,
         &dma_data_cfg,
-        &spi_get_hw(port)->dr,
+        &spi_get_hw(spi_port)->dr,
         NULL,
         buffer_pool->buffer_size,
         false

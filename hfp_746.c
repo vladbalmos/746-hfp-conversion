@@ -15,7 +15,8 @@
 #define BIT_RATE 10
 
 #define MAX_SAMPLES 1024
-#define SAMPLE_RATE_HZ 44100
+// #define SAMPLE_RATE_HZ 44100
+#define SAMPLE_RATE_HZ 16000
 
 #define SCLK 2
 #define MOSI 3
@@ -39,12 +40,12 @@ int main() {
     pool = dac_audio_init_buffer_pool(3, 512);
 
     // Init DAC
-    dac_audio_init(spi0, MOSI, SCLK, CS);
+    dac_audio_init(spi0, MOSI, SCLK, CS, DAC_SAMPLE_RATE_16KHZ);
     
     // Init Bluetooth
     // bt_init();
 
-    uint16_t freq = 1000;
+    uint16_t freq = 440;
     uint16_t samples_num = utils_generate_sine_wave(freq, sine_wave_buffer, SAMPLE_RATE_HZ, MAX_SINE_VALUE);
 
     printf("Generated %d samples for %dhz@%dkhz. Max sine value: %d\n", samples_num, freq, SAMPLE_RATE_HZ / 1000, MAX_SINE_VALUE);

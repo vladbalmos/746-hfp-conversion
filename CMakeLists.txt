@@ -25,7 +25,6 @@ target_link_libraries(pico_btstack_audio INTERFACE
 
 add_executable(hfp_746
     utils.c
-    dac.c
     dac_audio.c
     bt_a2dp_sink.c
     hfp_746.c
@@ -48,6 +47,7 @@ target_link_libraries(hfp_746
     hardware_dma
     hardware_sync
     hardware_spi
+    hardware_clocks
     )
 
 if(DEFINED ENV{DEBUG_MODE})
