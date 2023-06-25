@@ -47,7 +47,6 @@ uint16_t utils_bias_sine_wave(int16_t *src_buffer, uint16_t *dst_buffer, uint16_
         max = src_buffer_length;
     }
     
-    
     for (uint16_t i = start_at; i < max; i++) {
         *dst_buffer = src_buffer[i] + bias;
         dst_buffer++;
