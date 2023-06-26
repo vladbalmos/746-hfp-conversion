@@ -130,9 +130,19 @@ static void playback_handler(int16_t * buffer, uint16_t num_audio_frames){
     // first fill from resampled audio
     uint32_t bytes_read;
     btstack_ring_buffer_read(&decoded_audio_ring_buffer, (uint8_t *) buffer, num_audio_frames * BYTES_PER_FRAME, &bytes_read);
+    
+    // printf("Playback handler. Buffer incremented with: %d\n", bytes_read);
+    // for (int i = 0; i < bytes_read / 2; i++) {
+    //     printf("%05d ", buffer[i]);
+    //     if ((i + 1) % 8 == 0) {
+    //         printf("\n");
+    //     }
+    // }
+    // printf("\nPB\n");
 
-    buffer          += bytes_read / NUM_CHANNELS;
+    buffer          += bytes_read / 2;
     num_audio_frames   -= bytes_read / BYTES_PER_FRAME;
+    
     
     // then start decoding sbc frames using request_* globals
     request_buffer = buffer;
@@ -161,12 +171,23 @@ static void handle_pcm_data(int16_t * data, int num_audio_frames, int num_channe
 
     // store data in btstack_audio buffer first
     int frames_to_copy = btstack_min(resampled_frames, request_frames);
+    // printf("HBytes read: %d\n", frames_to_copy * BYTES_PER_FRAME);
+    
+    // for (int i = 0; i < frames_to_copy; i++) {
+    //     printf("%05d ", output_buffer[i]);
+    //     if ((i + 1) % 8 == 0) {
+    //         printf("\n");
+    //     }
+    // }
+    // printf("\n=====================================================================\n");
+    
     memcpy(request_buffer, output_buffer, frames_to_copy * BYTES_PER_FRAME);
     request_frames  -= frames_to_copy;
     request_buffer  += frames_to_copy * NUM_CHANNELS;
 
     // and rest in ring buffer
     int frames_to_store = resampled_frames - frames_to_copy;
+    // printf("Frames to store: %d\n", frames_to_store);
     if (frames_to_store){
         int status = btstack_ring_buffer_write(&decoded_audio_ring_buffer, (uint8_t *)&output_buffer[frames_to_copy * NUM_CHANNELS], frames_to_store * BYTES_PER_FRAME);
         if (status){

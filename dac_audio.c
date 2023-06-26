@@ -46,7 +46,7 @@ static void dac_single_write(uint16_t val) {
 }
 
 static void dma_handler() {
-    DEBUG("Freed ready buffer %p\n", current_buffer->bytes)
+    // DEBUG("Freed ready buffer %p %p\n", current_buffer, current_buffer->bytes)
     dac_audio_enqueue_free_buffer(current_buffer);
     // Clear the interrupt request.
     dma_hw->ints0 = 1u << dma_data_chan;
@@ -58,11 +58,12 @@ static void dma_handler() {
     
     dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
     if (buf != NULL) {
-        DEBUG("Got ready buffer %p\n", buf->bytes);
+        // DEBUG("Got ready buffer %p %p\n", buf, buf->bytes);
         current_buffer = buf;
         dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
         return;
     }
+    // DEBUG("=======\n%d %d\n-----------------\n", buffer_pool->available_buffers_count, buffer_pool->ready_buffers_count);
     
     dac_single_write(0);
     
@@ -75,14 +76,14 @@ int64_t stream_buffers(alarm_id_t id, void *user_data) {
         dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
 
         if (buf != NULL) {
-            DEBUG("Got ready buffer %p\n", buf->bytes);
+            // DEBUG("Got ready buffer %p %p\n", buf, buf->bytes);
             current_buffer = buf;
             dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
         } else {
             dac_single_write(0);
         }
     }
-    stream_alarm = add_alarm_in_ms(POLL_MS, stream_buffers, NULL, false);
+    // stream_alarm = add_alarm_in_ms(POLL_MS, stream_buffers, NULL, false);
     return 0;
 }
 
@@ -97,6 +98,8 @@ static dac_audio_buffer_t *init_audio_buffer(uint16_t buffer_size) {
     if (audio_buffer == NULL) {
         return NULL;
     }
+    
+    printf("Initialized %d\n", buffer_size * sizeof(uint16_t) );
 
     audio_buffer->bytes = bytes;
     audio_buffer->size = buffer_size * sizeof(uint16_t);

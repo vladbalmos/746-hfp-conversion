@@ -25,29 +25,47 @@ static btstack_timer_source_t  driver_timer_sink;
 
 static dac_audio_buffer_pool_t *pool;
 
+static uint16_t biased_pcm_data[DAC_BUFFER_MAX_SAMPLES];
+
 static void bt_audio_fill_buffers(void){
     while (true){
         dac_audio_buffer_t *audio_buffer = dac_audio_take_free_buffer();
         if (audio_buffer == NULL){
-            DEBUG("No more buffers\n");
+            stream_buffers(0, NULL);
             break;
         }
-        DEBUG("Got free buffer %p\n", audio_buffer->bytes);
 
-        int16_t * buffer16 = (int16_t *) audio_buffer->bytes;
-        (*playback_callback)(buffer16, pool->buffer_size);
-        audio_buffer->bytes = (int8_t *) buffer16;
+        (*playback_callback)((int16_t *) audio_buffer->bytes, pool->buffer_size);
+        int16_t *buffer16 = (int16_t *)audio_buffer->bytes;
 
-        // for (uint16_t i = 0; i < pool->buffer_size; i++) {
-        //     DEBUG("%d ", buffer16[i]);
+        // for (int i = 0; i < pool->buffer_size; i++) {
+        //     printf("%05d ", buffer16[i]);
+        //     if ((i + 1) % 8 == 0) {
+        //         printf("\n");
+        //     }
         // }
-        // DEBUG("\n============================\n");
-        // utils_prepare_audio_for_tlc5615(buffer16, buffer16, pool->buffer_size, pool->buffer_size, 0);
-        // for (uint16_t i = 0; i < pool->buffer_size; i++) {
-        //     DEBUG("%d ", buffer16[i]);
-        // }
-        // DEBUG("\n============================\n");
+        
+        
+        // DEBUG("\n=====aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa====\n");
 
+        for (int i = 0; i < pool->buffer_size; i++) {
+            biased_pcm_data[i] = ((buffer16[i] + 32768) / 64) << 2;
+        }
+        memcpy(audio_buffer->bytes, biased_pcm_data, sizeof(biased_pcm_data));
+        memset(biased_pcm_data, 0, sizeof(biased_pcm_data));
+
+        // uint16_t *b = (uint16_t *) audio_buffer->bytes;
+        // for (int i = 0; i < pool->buffer_size; i++) {
+        //     printf("%04d ", b[i]);
+        //     if ((i + 1) % 8 == 0) {
+        //         printf("\n");
+        //     }
+        // }
+        
+        
+        // DEBUG("\n=====aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa====\n");
+
+        // dac_audio_enqueue_free_buffer(audio_buffer);
         dac_audio_enqueue_ready_buffer(audio_buffer);
     }
 }

@@ -45,6 +45,7 @@
  */
 
 #include <stdio.h>
+#include "pico/time.h"
 #include "btstack_config.h"
 
 #include "btstack_debug.h"
@@ -112,15 +113,23 @@ static audio_buffer_pool_t *init_audio(uint32_t sample_frequency, uint8_t channe
 
 static void btstack_audio_pico_sink_fill_buffers(void){
     while (true){
+        absolute_time_t s = get_absolute_time();
         audio_buffer_t * audio_buffer = take_audio_buffer(btstack_audio_pico_audio_buffer_pool, false);
         if (audio_buffer == NULL){
             break;
         }
 
         int16_t * buffer16 = (int16_t *) audio_buffer->buffer->bytes;
-        printf("Getting data %p %d\n", audio_buffer->buffer->bytes, audio_buffer->max_sample_count);
         (*playback_callback)(buffer16, audio_buffer->max_sample_count);
-        printf("Got data %p\n", audio_buffer->buffer->bytes);
+
+        // for (int i = 0; i < audio_buffer->max_sample_count; i++) {
+        //     printf("%05d ", buffer16[i]);
+        //     if ((i + 1) % 8 == 0) {
+        //         printf("\n");
+        //     }
+        // }
+        
+        // printf("\n=====aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa====\n");
 
         // duplicate samples for mono
         if (btstack_audio_pico_channel_count == 1){
@@ -133,6 +142,8 @@ static void btstack_audio_pico_sink_fill_buffers(void){
 
         audio_buffer->sample_count = audio_buffer->max_sample_count;
         give_audio_buffer(btstack_audio_pico_audio_buffer_pool, audio_buffer);
+        absolute_time_t e = get_absolute_time();
+        printf("%d\n", absolute_time_diff_us(s, e));
     }
 }
 

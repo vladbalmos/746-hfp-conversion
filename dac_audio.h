@@ -29,6 +29,7 @@ void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs,
 void dac_audio_start_streaming();
 void dac_audio_stop_streaming();
 
+int64_t stream_buffers(alarm_id_t id, void *user_data);
 dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, uint16_t buffer_size);
 dac_audio_buffer_t *dac_audio_take_free_buffer();
 dac_audio_buffer_t *dac_audio_take_ready_buffer();
