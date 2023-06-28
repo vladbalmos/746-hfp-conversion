@@ -10,7 +10,7 @@
 
 #define POLL_MS 5
 
-#define SPI_BAUD_RATE_HZ 10 * 1000 * 1000
+#define SPI_BAUD_RATE_HZ 5 * 1000 * 1000
 
 static spi_inst_t *initialized_spi_port = NULL;
 static uint dma_timer_0 = 0;
@@ -24,10 +24,11 @@ static dma_channel_config dma_data_cfg;
 
 static dac_audio_buffer_pool_t *buffer_pool = NULL;
 static uint8_t transfer_in_progress = 0;
+// int64_t s;
 
 static uint16_t dreq_timer_fractions[2][3] = {
     {8, 63000, 16000},
-    {23, 65535, 44100}
+    {23, 65193, 44100}
 };
 
 static uint16_t current_sample_rate;
@@ -46,10 +47,7 @@ static void dac_single_write(uint16_t val) {
 }
 
 static void dma_handler() {
-    // DEBUG("Freed ready buffer %p %p\n", current_buffer, current_buffer->bytes)
     dac_audio_enqueue_free_buffer(current_buffer);
-    // Clear the interrupt request.
-    dma_hw->ints0 = 1u << dma_data_chan;
     
     if (!is_streaming) {
         transfer_in_progress = 0;
@@ -58,16 +56,18 @@ static void dma_handler() {
     
     dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
     if (buf != NULL) {
-        // DEBUG("Got ready buffer %p %p\n", buf, buf->bytes);
         current_buffer = buf;
+        // Clear the interrupt request.
+        dma_hw->ints0 = 1u << dma_data_chan;
         dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
         return;
     }
-    // DEBUG("=======\n%d %d\n-----------------\n", buffer_pool->available_buffers_count, buffer_pool->ready_buffers_count);
     
-    dac_single_write(0);
+    // dac_single_write(0);
     
     transfer_in_progress = 0;
+    // Clear the interrupt request.
+    dma_hw->ints0 = 1u << dma_data_chan;
 }
 
 int64_t stream_buffers(alarm_id_t id, void *user_data) {
@@ -76,14 +76,13 @@ int64_t stream_buffers(alarm_id_t id, void *user_data) {
         dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
 
         if (buf != NULL) {
-            // DEBUG("Got ready buffer %p %p\n", buf, buf->bytes);
             current_buffer = buf;
             dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
         } else {
-            dac_single_write(0);
+            // dac_single_write(0);
         }
     }
-    // stream_alarm = add_alarm_in_ms(POLL_MS, stream_buffers, NULL, false);
+    stream_alarm = add_alarm_in_ms(POLL_MS, stream_buffers, NULL, false);
     return 0;
 }
 
@@ -99,8 +98,6 @@ static dac_audio_buffer_t *init_audio_buffer(uint16_t buffer_size) {
         return NULL;
     }
     
-    printf("Initialized %d\n", buffer_size * sizeof(uint16_t) );
-
     audio_buffer->bytes = bytes;
     audio_buffer->size = buffer_size * sizeof(uint16_t);
     audio_buffer->next = NULL;
@@ -146,8 +143,10 @@ void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs,
     channel_config_set_write_increment(&dma_data_cfg, false);
 
     // Set SPI write rate (must clossly match the audio sample rate)
+    dma_timer_claim(dma_timer_0);
     dma_timer_set_fraction(dma_timer_0, dreq_timer_numerator, dreq_timer_denominator);
     channel_config_set_dreq(&dma_data_cfg, DREQ_DMA_TIMER0);
+    channel_config_set_ring(&dma_data_cfg, false, 0);
     
     dma_channel_configure(
         dma_data_chan,

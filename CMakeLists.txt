@@ -5,6 +5,7 @@ include(pico_extras_import_optional.cmake)
 project(hfp_746 VERSION 0.1 LANGUAGES C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
+set(PICO_BOARD pico_w)
 
 pico_sdk_init()
 
@@ -18,10 +19,6 @@ add_library(pico_btstack_audio INTERFACE)
 target_sources(pico_btstack_audio INTERFACE
         ${PICO_BTSTACK_PATH}/src/btstack_audio.c
         bt_audio.c
-        # audio.c
-        )
-target_link_libraries(pico_btstack_audio INTERFACE
-        pico_audio_i2s
         )
 
 add_executable(hfp_746

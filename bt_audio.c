@@ -25,48 +25,42 @@ static btstack_timer_source_t  driver_timer_sink;
 
 static dac_audio_buffer_pool_t *pool;
 
-static uint16_t biased_pcm_data[DAC_BUFFER_MAX_SAMPLES];
+static int16_t pcm_data[DAC_BUFFER_MAX_SAMPLES * 2];
+
+static spin_lock_t *sl;
 
 static void bt_audio_fill_buffers(void){
     while (true){
+        uint32_t save_irq = spin_lock_blocking(sl);
         dac_audio_buffer_t *audio_buffer = dac_audio_take_free_buffer();
+        spin_unlock(sl, save_irq);
+
         if (audio_buffer == NULL){
-            stream_buffers(0, NULL);
             break;
         }
 
-        (*playback_callback)((int16_t *) audio_buffer->bytes, pool->buffer_size);
-        int16_t *buffer16 = (int16_t *)audio_buffer->bytes;
+        (*playback_callback)(pcm_data, pool->buffer_size);
+        uint16_t *b = audio_buffer->bytes;
 
-        // for (int i = 0; i < pool->buffer_size; i++) {
-        //     printf("%05d ", buffer16[i]);
-        //     if ((i + 1) % 8 == 0) {
-        //         printf("\n");
-        //     }
-        // }
-        
-        
-        // DEBUG("\n=====aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa====\n");
 
-        for (int i = 0; i < pool->buffer_size; i++) {
-            biased_pcm_data[i] = ((buffer16[i] + 32768) / 64) << 2;
+        for (int i = 0; i < pool->buffer_size * 2; i += 2) {
+            uint16_t sample = ((pcm_data[i] + 32768) / 64) << 2;
+            // printf("%d ", sample);
+            *b = sample;
+            b++;
+            
+            // if ((i + 1) % 8 == 0) {
+            //     printf("\n");
+            // }
         }
-        memcpy(audio_buffer->bytes, biased_pcm_data, sizeof(biased_pcm_data));
-        memset(biased_pcm_data, 0, sizeof(biased_pcm_data));
+        // printf("\n==================================\n");
 
-        // uint16_t *b = (uint16_t *) audio_buffer->bytes;
-        // for (int i = 0; i < pool->buffer_size; i++) {
-        //     printf("%04d ", b[i]);
-        //     if ((i + 1) % 8 == 0) {
-        //         printf("\n");
-        //     }
-        // }
         
-        
-        // DEBUG("\n=====aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa====\n");
+        memset(pcm_data, 0, sizeof(pcm_data));
 
-        // dac_audio_enqueue_free_buffer(audio_buffer);
+        save_irq = spin_lock_blocking(sl);
         dac_audio_enqueue_ready_buffer(audio_buffer);
+        spin_unlock(sl, save_irq);
     }
 }
 
@@ -90,6 +84,8 @@ static int bt_audio_sink_init(
         panic("Unable to allocate memory for DAC buffer pool!\n");
     }
     dac_audio_init(spi0, MOSI, SCLK, CS, DAC_SAMPLE_RATE_44KHZ);
+    
+    sl = spin_lock_init(spin_lock_claim_unused(true));
 
     return 0;
 }

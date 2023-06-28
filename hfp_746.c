@@ -34,17 +34,15 @@ int main() {
         return -1;
     }
     
-
-    // pool = dac_audio_init_buffer_pool(DAC_BUFFER_POOL_SIZE, DAC_BUFFER_MAX_SAMPLES);
-
-    // Init DAC
-    // dac_audio_init(spi0, MOSI, SCLK, CS, DAC_SAMPLE_RATE_16KHZ);
-    
     // Init Bluetooth
     bt_init();
     while (true) {
         __wfi();
     }
+    // pool = dac_audio_init_buffer_pool(DAC_BUFFER_POOL_SIZE, DAC_BUFFER_MAX_SAMPLES);
+
+    // // Init DAC
+    // dac_audio_init(spi0, MOSI, SCLK, CS, DAC_SAMPLE_RATE_44KHZ);
 
     // uint16_t freq = 1000;
     // uint16_t sample_rate = dac_audio_get_sample_rate();
@@ -52,7 +50,7 @@ int main() {
 
     // printf("Generated %d samples for %dhz@%dkhz. Max sine value: %d\n", samples_num, freq, sample_rate / 1000, MAX_SINE_VALUE);
     
-    // // dac_audio_start_streaming();
+    // dac_audio_start_streaming();
     // printf("Streaming data\n");
     
     // uint16_t sine_wave_index = 0;
@@ -62,7 +60,6 @@ int main() {
     //     dac_audio_buffer_t *buf = dac_audio_take_free_buffer();
 
     //     if (buf == NULL) {
-    //         __wfe();
     //         continue;
     //     }
         

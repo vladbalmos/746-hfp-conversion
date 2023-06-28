@@ -6,7 +6,7 @@
 #include "btstack_ring_buffer.h"
 #include "btstack.h"
 
-#define NUM_CHANNELS 1
+#define NUM_CHANNELS 2
 #define BYTES_PER_FRAME     (2*NUM_CHANNELS)
 #define MAX_SBC_FRAME_SIZE 120
 
@@ -17,13 +17,13 @@ static uint8_t  device_id_sdp_service_buffer[100];
 
 // we support all configurations with bitpool 2-53
 static uint8_t media_sbc_codec_capabilities[] = {
-    // 0xFF,//(AVDTP_SBC_44100 << 4) | AVDTP_SBC_STEREO,
-    (15 << 4) | AVDTP_SBC_MONO,
+    0xFF,//(AVDTP_SBC_44100 << 4) | AVDTP_SBC_STEREO,
     0xFF,//(AVDTP_SBC_BLOCK_LENGTH_16 << 4) | (AVDTP_SBC_SUBBANDS_8 << 2) | AVDTP_SBC_ALLOCATION_METHOD_LOUDNESS,
     2, 53
 };
 
 
+// SBC Decoder for WAV file or live playback
 static btstack_sbc_decoder_state_t state;
 static btstack_sbc_mode_t mode = SBC_MODE_STANDARD;
 
@@ -131,16 +131,7 @@ static void playback_handler(int16_t * buffer, uint16_t num_audio_frames){
     uint32_t bytes_read;
     btstack_ring_buffer_read(&decoded_audio_ring_buffer, (uint8_t *) buffer, num_audio_frames * BYTES_PER_FRAME, &bytes_read);
     
-    // printf("Playback handler. Buffer incremented with: %d\n", bytes_read);
-    // for (int i = 0; i < bytes_read / 2; i++) {
-    //     printf("%05d ", buffer[i]);
-    //     if ((i + 1) % 8 == 0) {
-    //         printf("\n");
-    //     }
-    // }
-    // printf("\nPB\n");
-
-    buffer          += bytes_read / 2;
+    buffer          += bytes_read / NUM_CHANNELS;
     num_audio_frames   -= bytes_read / BYTES_PER_FRAME;
     
     
@@ -171,15 +162,6 @@ static void handle_pcm_data(int16_t * data, int num_audio_frames, int num_channe
 
     // store data in btstack_audio buffer first
     int frames_to_copy = btstack_min(resampled_frames, request_frames);
-    // printf("HBytes read: %d\n", frames_to_copy * BYTES_PER_FRAME);
-    
-    // for (int i = 0; i < frames_to_copy; i++) {
-    //     printf("%05d ", output_buffer[i]);
-    //     if ((i + 1) % 8 == 0) {
-    //         printf("\n");
-    //     }
-    // }
-    // printf("\n=====================================================================\n");
     
     memcpy(request_buffer, output_buffer, frames_to_copy * BYTES_PER_FRAME);
     request_frames  -= frames_to_copy;
@@ -187,7 +169,6 @@ static void handle_pcm_data(int16_t * data, int num_audio_frames, int num_channe
 
     // and rest in ring buffer
     int frames_to_store = resampled_frames - frames_to_copy;
-    // printf("Frames to store: %d\n", frames_to_store);
     if (frames_to_store){
         int status = btstack_ring_buffer_write(&decoded_audio_ring_buffer, (uint8_t *)&output_buffer[frames_to_copy * NUM_CHANNELS], frames_to_store * BYTES_PER_FRAME);
         if (status){
@@ -468,7 +449,7 @@ static void handle_l2cap_media_data_packet(uint8_t seid, uint8_t *packet, uint16
         
     int status = btstack_ring_buffer_write(&sbc_frame_ring_buffer, packet+pos, size-pos);
     if (status != ERROR_CODE_SUCCESS){
-        // printf("Error storing samples in SBC ring buffer!!!\n");
+        printf("Error storing samples in SBC ring buffer!!!\n");
     }
 
     // decide on audio sync drift based on number of sbc frames in queue
