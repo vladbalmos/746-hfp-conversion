@@ -9,30 +9,33 @@
 #include "debug.h"
 
 #define POLL_MS 5
-
 #define SPI_BAUD_RATE_HZ 5 * 1000 * 1000
 
 static spi_inst_t *initialized_spi_port = NULL;
-static uint dma_timer_0 = 0;
+
 static uint8_t mosi_pin;
 static uint8_t clk_pin;
 static uint8_t cs_pin;
 
-static dac_audio_buffer_t *current_buffer = NULL;
+static uint32_t cpu_clock_freq_hz;
+
+
+static uint dma_timer_0 = 0;
 static int dma_data_chan;
 static dma_channel_config dma_data_cfg;
-
-static dac_audio_buffer_pool_t *buffer_pool = NULL;
-static uint8_t transfer_in_progress = 0;
-// int64_t s;
-
 static uint16_t dreq_timer_fractions[2][3] = {
     {8, 63000, 16000},
     {23, 65193, 44100}
 };
 
+static dac_audio_buffer_pool_t *buffer_pool = NULL;
+static dac_audio_buffer_t *current_buffer = NULL;
+
+static uint8_t transfer_in_progress = 0;
+
 static uint16_t current_sample_rate;
 static alarm_id_t stream_alarm;
+
 static uint8_t is_streaming = 0;
 
 static inline void ensure_initialization() {
@@ -41,16 +44,27 @@ static inline void ensure_initialization() {
     }
 }
 
-static void dac_single_write(uint16_t val) {
+static inline void dac_single_write(uint16_t val) {
     uint16_t data[1] = { val };
     spi_write16_blocking(initialized_spi_port, data, 1);
 }
 
-static void dac_enable(uint8_t status) {
+static inline void dac_enable(uint8_t status) {
     gpio_put(cs_pin, !status);
 }
 
+static inline void transfer_ready_buffer() {
+    dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
+    if (buf != NULL) {
+        current_buffer = buf;
+        dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
+        return;
+    }
+    transfer_in_progress = 0;
+}
+
 static void dma_handler() {
+    // Free the previous used buffer
     dac_audio_enqueue_free_buffer(current_buffer);
     dma_hw->ints0 = 1u << dma_data_chan;
 
@@ -59,25 +73,17 @@ static void dma_handler() {
         return;
     }
     
-    dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
-    if (buf != NULL) {
-        current_buffer = buf;
-        dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
-        return;
-    }
-    
-    transfer_in_progress = 0;
+    transfer_ready_buffer();
 }
 
 int64_t stream_buffers(alarm_id_t id, void *user_data) {
+    if (!is_streaming) {
+        return 0;
+    }
+
     if (!transfer_in_progress) {
         transfer_in_progress = 1;
-        dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
-
-        if (buf != NULL) {
-            current_buffer = buf;
-            dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
-        }
+        transfer_ready_buffer();
     }
     stream_alarm = add_alarm_in_ms(POLL_MS, stream_buffers, NULL, false);
     return 0;
@@ -106,13 +112,16 @@ inline uint16_t dac_audio_get_sample_rate() {
 }
 
 void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs, dac_audio_sample_rate_t sample_rate) {
+    cpu_clock_freq_hz = clock_get_hz(clk_sys);
     uint16_t dreq_timer_numerator = dreq_timer_fractions[sample_rate][0];
     uint16_t dreq_timer_denominator = dreq_timer_fractions[sample_rate][1];
     current_sample_rate = dreq_timer_fractions[sample_rate][2];
+    float actual_sample_rate = cpu_clock_freq_hz * dreq_timer_numerator / dreq_timer_denominator;
     
     initialized_spi_port = spi_port;
     
-    DEBUG("Initializing DAC for %d sample rate using DMA timer fractional parts %d/%d\n", current_sample_rate, dreq_timer_numerator, dreq_timer_denominator);
+    DEBUG("Initializing DAC for %d wanted sample rate using DMA timer fractional parts %d/%d\n", current_sample_rate, dreq_timer_numerator, dreq_timer_denominator);
+    DEBUG("Actual computed sample rate: %f\n", actual_sample_rate);
     DEBUG("DAC DMA transfer count: %d\n", buffer_pool->buffer_size);
 
     // Init spi port and baud rate
@@ -168,35 +177,31 @@ void dac_audio_start_streaming() {
     dac_enable(1);
     
     is_streaming = 1;
-    stream_alarm = add_alarm_in_ms(POLL_MS, stream_buffers, NULL, false);
+    stream_buffers(0, NULL);
 }
 
 void dac_audio_stop_streaming() {
-    DEBUG("Stop streaming. Current state is %d\n", is_streaming);
-    uart_default_tx_wait_blocking();
+    DEBUG("Stopping streaming... Current state is %d\n", is_streaming);
     if (!is_streaming) {
         return;
     }
     
     is_streaming = 0;
     cancel_alarm(stream_alarm);
-    DEBUG("Waiting for dma to finish. Current state is: %d\n", dma_channel_is_busy(dma_data_chan));
+
     DEBUG("Available buffers count %d\n", buffer_pool->available_buffers_count);
-    uart_default_tx_wait_blocking();
     DEBUG("Read buffers count %d\n", buffer_pool->ready_buffers_count);
-    uart_default_tx_wait_blocking();
     DEBUG("Remaining free buffer slots%d\n", dac_audio_remaining_free_buffer_slots());
-    uart_default_tx_wait_blocking();
     DEBUG("Remaining ready buffer slots%d\n", dac_audio_remaining_ready_buffer_slots());
-    uart_default_tx_wait_blocking();
+    DEBUG("Waiting for dma to finish. Current state is: %d\n", dma_channel_is_busy(dma_data_chan));
+
     dma_channel_wait_for_finish_blocking(dma_data_chan);
-    // TODO: fill pcm_data with zeros
+
     DEBUG("Resetting buffers\n");
-    uart_default_tx_wait_blocking();
     dac_audio_reset_buffer_pool();
     DEBUG("Disabling DAC\n");
-    uart_default_tx_wait_blocking();
     dac_enable(0);
+    DEBUG("Streaming stoped!\n");
 }
 
 dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, uint16_t buffer_size) {
@@ -327,10 +332,9 @@ void dac_audio_reset_buffer_pool() {
     while (buffer_pool->ready_buffers_count) {
         dac_audio_enqueue_free_buffer(dac_audio_take_ready_buffer());
     }
-
-    DEBUG("Buf pool reset\n");
+    DEBUG("Buffer pool reset\n");
     DEBUG("Available buffers count %d\n", buffer_pool->available_buffers_count);
     DEBUG("Read buffers count %d\n", buffer_pool->ready_buffers_count);
-    DEBUG("Remaining free buffer slots%d\n", dac_audio_remaining_free_buffer_slots());
-    DEBUG("Remaining ready buffer slots%d\n", dac_audio_remaining_ready_buffer_slots());
+    DEBUG("Remaining free buffer slots %d\n", dac_audio_remaining_free_buffer_slots());
+    DEBUG("Remaining ready buffer slots %d\n", dac_audio_remaining_ready_buffer_slots());
 }

@@ -1,10 +1,13 @@
+/**
+ * Based on the btstack_audio_pico.c from:
+ *   https://github.com/raspberrypi/pico-examples/blob/master/pico_w/bt/btstack_audio_pico.c
+ */
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 #include "hardware/sync.h"
 #include "btstack.h"
 #include "dac_audio.h"
 #include "bt_audio.h"
-#include "utils.h"
 #include "debug.h"
 
 #define SCLK 2
@@ -18,19 +21,18 @@
 
 static uint8_t btstack_audio_pico_sink_active;
 
-// client
 static void (*playback_callback)(int16_t * buffer, uint16_t num_samples);
 
 static btstack_timer_source_t  driver_timer_sink;
 
 static dac_audio_buffer_pool_t *pool = NULL;
 
+// Holds stereo PCM data
 static int16_t pcm_data[DAC_BUFFER_MAX_SAMPLES * 2];
 
 static spin_lock_t *sl;
 
 static void bt_audio_fill_buffers(void){
-    // int counter = 0;
     while (true){
         uint32_t save_irq = spin_lock_blocking(sl);
         dac_audio_buffer_t *audio_buffer = dac_audio_take_free_buffer();
@@ -40,13 +42,10 @@ static void bt_audio_fill_buffers(void){
             break;
         }
 
-        // if (counter++ > 2) {
-        //     break;
-        // }
         (*playback_callback)(pcm_data, pool->buffer_size);
-        uint16_t *b = audio_buffer->bytes;
+        uint16_t *b = (uint16_t *) audio_buffer->bytes;
 
-        // Use only the left channel data
+        // Copy the left channel data
         for (int i = 0; i < pool->buffer_size * 2; i += 2) {
             uint16_t sample = ((pcm_data[i] + 32768) / 64) << 2;
             *b = sample;
@@ -63,7 +62,6 @@ static void bt_audio_fill_buffers(void){
 
 static void driver_timer_handler_sink(btstack_timer_source_t * ts){
     bt_audio_fill_buffers();
-
     btstack_run_loop_set_timer(ts, DRIVER_POLL_INTERVAL_MS);
     btstack_run_loop_add_timer(ts);
 }
@@ -91,7 +89,6 @@ static void bt_audio_sink_set_volume(uint8_t volume){
 }
 
 static void bt_audio_sink_start_stream(void){
-    DEBUG("Starting stream again\n");
     bt_audio_fill_buffers();
 
     btstack_run_loop_set_timer_handler(&driver_timer_sink, &driver_timer_handler_sink);
