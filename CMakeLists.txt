@@ -6,6 +6,7 @@ project(hfp_746 VERSION 0.1 LANGUAGES C CXX ASM)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(PICO_BOARD pico_w)
+set(PICO_CXX_ENABLE_EXCEPTI0ONS 1)
 
 pico_sdk_init()
 

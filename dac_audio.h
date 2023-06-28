@@ -38,3 +38,4 @@ uint8_t dac_audio_remaining_free_buffer_slots();
 uint8_t dac_audio_remaining_ready_buffer_slots();
 uint8_t dac_audio_enqueue_ready_buffer(dac_audio_buffer_t *buffer);
 uint8_t dac_audio_enqueue_free_buffer(dac_audio_buffer_t *buffer);
+void dac_audio_reset_buffer_pool();

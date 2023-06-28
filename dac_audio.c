@@ -46,9 +46,14 @@ static void dac_single_write(uint16_t val) {
     spi_write16_blocking(initialized_spi_port, data, 1);
 }
 
+static void dac_enable(uint8_t status) {
+    gpio_put(cs_pin, !status);
+}
+
 static void dma_handler() {
     dac_audio_enqueue_free_buffer(current_buffer);
-    
+    dma_hw->ints0 = 1u << dma_data_chan;
+
     if (!is_streaming) {
         transfer_in_progress = 0;
         return;
@@ -57,17 +62,11 @@ static void dma_handler() {
     dac_audio_buffer_t *buf = dac_audio_take_ready_buffer();
     if (buf != NULL) {
         current_buffer = buf;
-        // Clear the interrupt request.
-        dma_hw->ints0 = 1u << dma_data_chan;
         dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
         return;
     }
     
-    // dac_single_write(0);
-    
     transfer_in_progress = 0;
-    // Clear the interrupt request.
-    dma_hw->ints0 = 1u << dma_data_chan;
 }
 
 int64_t stream_buffers(alarm_id_t id, void *user_data) {
@@ -78,8 +77,6 @@ int64_t stream_buffers(alarm_id_t id, void *user_data) {
         if (buf != NULL) {
             current_buffer = buf;
             dma_channel_set_read_addr(dma_data_chan, &buf->bytes[0], true);
-        } else {
-            // dac_single_write(0);
         }
     }
     stream_alarm = add_alarm_in_ms(POLL_MS, stream_buffers, NULL, false);
@@ -131,7 +128,7 @@ void dac_audio_init(spi_inst_t *spi_port, uint8_t mosi, uint8_t clk, uint8_t cs,
     gpio_set_function(cs_pin, GPIO_FUNC_SPI);
     
     // Silence please!
-    dac_single_write(0);
+    dac_enable(0);
 
     dma_data_chan = dma_claim_unused_channel(true);
 
@@ -168,20 +165,38 @@ void dac_audio_start_streaming() {
         return;
     }
     
+    dac_enable(1);
     
     is_streaming = 1;
     stream_alarm = add_alarm_in_ms(POLL_MS, stream_buffers, NULL, false);
 }
 
 void dac_audio_stop_streaming() {
+    DEBUG("Stop streaming. Current state is %d\n", is_streaming);
+    uart_default_tx_wait_blocking();
     if (!is_streaming) {
         return;
     }
     
     is_streaming = 0;
     cancel_alarm(stream_alarm);
+    DEBUG("Waiting for dma to finish. Current state is: %d\n", dma_channel_is_busy(dma_data_chan));
+    DEBUG("Available buffers count %d\n", buffer_pool->available_buffers_count);
+    uart_default_tx_wait_blocking();
+    DEBUG("Read buffers count %d\n", buffer_pool->ready_buffers_count);
+    uart_default_tx_wait_blocking();
+    DEBUG("Remaining free buffer slots%d\n", dac_audio_remaining_free_buffer_slots());
+    uart_default_tx_wait_blocking();
+    DEBUG("Remaining ready buffer slots%d\n", dac_audio_remaining_ready_buffer_slots());
+    uart_default_tx_wait_blocking();
     dma_channel_wait_for_finish_blocking(dma_data_chan);
-    dac_single_write(0);
+    // TODO: fill pcm_data with zeros
+    DEBUG("Resetting buffers\n");
+    uart_default_tx_wait_blocking();
+    dac_audio_reset_buffer_pool();
+    DEBUG("Disabling DAC\n");
+    uart_default_tx_wait_blocking();
+    dac_enable(0);
 }
 
 dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, uint16_t buffer_size) {
@@ -306,4 +321,16 @@ dac_audio_buffer_t *dac_audio_take_ready_buffer() {
     }
 
     return buf;
+}
+
+void dac_audio_reset_buffer_pool() {
+    while (buffer_pool->ready_buffers_count) {
+        dac_audio_enqueue_free_buffer(dac_audio_take_ready_buffer());
+    }
+
+    DEBUG("Buf pool reset\n");
+    DEBUG("Available buffers count %d\n", buffer_pool->available_buffers_count);
+    DEBUG("Read buffers count %d\n", buffer_pool->ready_buffers_count);
+    DEBUG("Remaining free buffer slots%d\n", dac_audio_remaining_free_buffer_slots());
+    DEBUG("Remaining ready buffer slots%d\n", dac_audio_remaining_ready_buffer_slots());
 }
