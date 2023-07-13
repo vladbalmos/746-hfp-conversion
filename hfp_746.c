@@ -8,6 +8,7 @@
 #include "hardware/spi.h"
 #include "bt_a2dp_sink.h"
 #include "dac_audio.h"
+#include "ringer.h"
 #include "utils.h"
 #include "debug.h"
 
@@ -20,6 +21,10 @@
 
 #define DAC_BUFFER_POOL_SIZE 3
 #define DAC_BUFFER_MAX_SAMPLES 512
+
+#define RING_SIGNAL_PIN 17
+#define ENABLE_RINGER_PIN 16
+#define ENABLE_RINGER_BTN_PIN 15
 
 int16_t sine_wave_buffer[MAX_SAMPLES];
 uint16_t samples_num = 0;
@@ -34,11 +39,39 @@ int main() {
         return -1;
     }
     
-    // Init Bluetooth
-    bt_init();
+    gpio_init(ENABLE_RINGER_BTN_PIN);
+    gpio_set_dir(ENABLE_RINGER_BTN_PIN, GPIO_IN);
+
+    ringer_init(ENABLE_RINGER_PIN, RING_SIGNAL_PIN);
+
+    uint8_t ringer_enabled = 0;
+    DEBUG("Initialized\n");
     while (true) {
-        __wfi();
+        if (gpio_get(ENABLE_RINGER_BTN_PIN)) {
+            if (!ringer_enabled) {
+                sleep_ms(250);
+                ringer_enabled = 1;
+                ringer_enable(ringer_enabled);
+                DEBUG("Ringer is enabled\n");
+                continue;
+            }
+            
+            ringer_enabled = 0;
+            ringer_enable(ringer_enabled);
+            sleep_ms(250);
+            DEBUG("Ringer is disabled\n");
+            continue;
+        }
+        
+        
+        sleep_ms(25);
     }
+    
+    // Init Bluetooth
+    // bt_init();
+    // while (true) {
+    //     __wfi();
+    // }
     // pool = dac_audio_init_buffer_pool(DAC_BUFFER_POOL_SIZE, DAC_BUFFER_MAX_SAMPLES);
 
     // // Init DAC
@@ -83,6 +116,17 @@ int main() {
     //     }
         
     //     dac_audio_enqueue_ready_buffer(buf);
+    // }
+    
+    
+
+    // while (true) {
+    //     sleep_ms(50);
+
+    //     gpio_put(H_BRIDGE_LEFT_PIN, left_state);
+    //     gpio_put(H_BRIDGE_RIGHT_PIN, !left_state);
+        
+    //     left_state = !left_state;
     // }
     return 0;
 }

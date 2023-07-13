@@ -23,6 +23,7 @@ target_sources(pico_btstack_audio INTERFACE
 
 add_executable(hfp_746
     utils.c
+    ringer.c
     dac_audio.c
     bt_a2dp_sink.c
     hfp_746.c
@@ -42,6 +43,7 @@ target_link_libraries(hfp_746
     pico_btstack_sbc_decoder
     pico_cyw43_arch_none
     hardware_adc
+    hardware_pwm
     hardware_dma
     hardware_sync
     hardware_spi

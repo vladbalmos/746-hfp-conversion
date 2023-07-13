@@ -5,17 +5,17 @@
 
 build:
 	mkdir -p build
-	cd build && cmake -DCYW43_LWIP=0 -DPICO_BOARD=pico_w .. && make -j4
+	cd build && cmake -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=pico_w .. && make -j4
 
 # Show debug messages
 debug:
 	mkdir -p debug
-	cd debug && DEBUG_MODE=1 cmake -DPICO_BOARD=pico_w .. && make -j4
+	cd debug && DEBUG_MODE=1 cmake -DCMAKE_BUILD_TYPE=Debug -DPICO_BOARD=pico_w .. && make -j4
 
 # Show btstack debug messages
 bt-debug:
 	mkdir -p bt-debug
-	cd bt-debug && DEBUG_MODE=1 BT_DEBUG_MODE=1 cmake -DPICO_BOARD=pico_w .. && make -j4
+	cd bt-debug && DEBUG_MODE=1 BT_DEBUG_MODE=1 cmake -DCMAKE_BUILD_TYPE=Debug -DPICO_BOARD=pico_w .. && make -j4
 
 clean:
 	rm -rf build
