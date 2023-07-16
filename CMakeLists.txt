@@ -24,6 +24,7 @@ target_sources(pico_btstack_audio INTERFACE
 add_executable(hfp_746
     utils.c
     ringer.c
+    dialer.c
     dac_audio.c
     bt_a2dp_sink.c
     hfp_746.c
