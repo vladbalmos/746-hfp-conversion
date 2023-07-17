@@ -27,14 +27,17 @@
 #define ENABLE_RINGER_PIN 16
 #define ENABLE_RINGER_BTN_PIN 15
 
-#define HOOK_SWITCH_PIN 13
 #define DIALER_PULSE_PIN 12
+#define HOOK_SWITCH_PIN 13
 
 int16_t sine_wave_buffer[MAX_SAMPLES];
 uint16_t samples_num = 0;
 const uint16_t MAX_SINE_VALUE = ((1 << BIT_RATE) / 2) - 1;
 dac_audio_buffer_pool_t *pool = NULL;
 
+void on_headset_state_change(uint8_t state) {
+    DEBUG("Headset state change: %d\n", state);
+}
 
 void on_start_dialing() {
     DEBUG("Started dialing\n");
@@ -60,12 +63,9 @@ int main() {
     }
     DEBUG("Initialized\n");
     
-    dialer_init(DIALER_PULSE_PIN, NULL, NULL, NULL);
+    dialer_init(DIALER_PULSE_PIN, HOOK_SWITCH_PIN, on_headset_state_change, on_start_dialing, on_digit, on_end_dialing);
     dialer_enable(1);
     
-    gpio_init(HOOK_SWITCH_PIN);
-    gpio_set_dir(HOOK_SWITCH_PIN, GPIO_IN);
-
     gpio_set_irq_callback(default_irq_callback);
     irq_set_enabled(IO_IRQ_BANK0, 1);
 
