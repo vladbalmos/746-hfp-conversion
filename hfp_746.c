@@ -63,17 +63,19 @@ int main() {
     }
     DEBUG("Initialized\n");
     
-    dialer_init(DIALER_PULSE_PIN, HOOK_SWITCH_PIN, on_headset_state_change, on_start_dialing, on_digit, on_end_dialing);
-    dialer_enable(1);
+    // Dialer
+    // dialer_init(DIALER_PULSE_PIN, HOOK_SWITCH_PIN, on_headset_state_change, on_start_dialing, on_digit, on_end_dialing);
+    // dialer_enable(1);
     
-    gpio_set_irq_callback(default_irq_callback);
-    irq_set_enabled(IO_IRQ_BANK0, 1);
+    // gpio_set_irq_callback(default_irq_callback);
+    // irq_set_enabled(IO_IRQ_BANK0, 1);
 
-    while (true) {
-        sleep_ms(1000);
-    }
+    // while (true) {
+    //     sleep_ms(1000);
+    // }
 
     
+    // Ringer
     // gpio_init(ENABLE_RINGER_BTN_PIN);
     // gpio_set_dir(ENABLE_RINGER_BTN_PIN, GPIO_IN);
 
@@ -101,66 +103,10 @@ int main() {
     //     sleep_ms(25);
     // }
     
-    // Init Bluetooth
-    // bt_init();
-    // while (true) {
-    //     __wfi();
-    // }
-    // pool = dac_audio_init_buffer_pool(DAC_BUFFER_POOL_SIZE, DAC_BUFFER_MAX_SAMPLES);
-
-    // // Init DAC
-    // dac_audio_init(spi0, MOSI, SCLK, CS, DAC_SAMPLE_RATE_44KHZ);
-
-    // uint16_t freq = 1000;
-    // uint16_t sample_rate = dac_audio_get_sample_rate();
-    // uint16_t samples_num = utils_generate_sine_wave(freq, sine_wave_buffer, sample_rate, MAX_SINE_VALUE);
-
-    // printf("Generated %d samples for %dhz@%dkhz. Max sine value: %d\n", samples_num, freq, sample_rate / 1000, MAX_SINE_VALUE);
-    
-    // dac_audio_start_streaming();
-    // printf("Streaming data\n");
-    
-    // uint16_t sine_wave_index = 0;
-    // uint16_t sine_read_samples = 0;
-    
-    // while (true) {
-    //     dac_audio_buffer_t *buf = dac_audio_take_free_buffer();
-
-    //     if (buf == NULL) {
-    //         continue;
-    //     }
-        
-    //     uint16_t buffer_length = buf->size / sizeof(uint16_t);
-    //     uint16_t buffer_used = 0;
-    //     uint16_t *buffer = (uint16_t *) buf->bytes;
-    //     uint16_t buffer_free_length = buffer_length - buffer_used;
-        
-    //     while (buffer_free_length > 0) {
-    //         uint16_t max = (samples_num < buffer_free_length) ? samples_num : buffer_free_length;
-
-    //         if (sine_wave_index >= samples_num) {
-    //             sine_wave_index = 0;
-    //         }
-
-    //         sine_read_samples = utils_prepare_audio_for_tlc5615(sine_wave_buffer, buffer + buffer_used, samples_num, max, sine_wave_index);
-    //         sine_wave_index += sine_read_samples;
-            
-    //         buffer_used += sine_read_samples;
-    //         buffer_free_length = buffer_length - buffer_used;
-    //     }
-        
-    //     dac_audio_enqueue_ready_buffer(buf);
-    // }
-    
-    
-
-    // while (true) {
-    //     sleep_ms(50);
-
-    //     gpio_put(H_BRIDGE_LEFT_PIN, left_state);
-    //     gpio_put(H_BRIDGE_RIGHT_PIN, !left_state);
-        
-    //     left_state = !left_state;
-    // }
+    // Bluetooth
+    bt_init();
+    while (true) {
+        __wfi();
+    }
     return 0;
 }
