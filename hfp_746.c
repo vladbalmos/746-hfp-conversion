@@ -1,12 +1,10 @@
 #include <stdio.h>
 #include "pico/stdio.h"
 #include "pico/stdlib.h"
-#include "pico/cyw43_arch.h"
 
 #include "hardware/adc.h"
 #include "hardware/sync.h"
 #include "hardware/spi.h"
-#include "bt_a2dp_sink.h"
 #include "dac_audio.h"
 #include "ringer.h"
 #include "dialer.h"
@@ -57,10 +55,7 @@ void default_irq_callback(uint pin, uint32_t event_mask) {
 
 int main() {
     stdio_init_all();
-    if (cyw43_arch_init()) {
-        printf("Failed to initialise cyw43_arch\n");
-        return -1;
-    }
+
     DEBUG("Initialized\n");
     
     // Dialer
@@ -102,11 +97,5 @@ int main() {
         
     //     sleep_ms(25);
     // }
-    
-    // Bluetooth
-    bt_init();
-    while (true) {
-        __wfi();
-    }
     return 0;
 }
