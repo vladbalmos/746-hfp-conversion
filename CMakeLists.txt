@@ -26,6 +26,7 @@ add_executable(hfp_746
     ringer.c
     dialer.c
     dac_audio.c
+    # bt.c
     bt_a2dp_sink.c
     hfp_746.c
 )
@@ -37,11 +38,11 @@ pico_enable_stdio_uart(hfp_746 1)
 target_link_libraries(hfp_746
     pico_stdlib
     pico_malloc
-    pico_btstack_ble
     pico_btstack_classic
     pico_btstack_cyw43
     pico_btstack_audio
     pico_btstack_sbc_decoder
+    pico_btstack_sbc_encoder
     pico_cyw43_arch_none
     hardware_adc
     hardware_pwm
@@ -59,7 +60,6 @@ endif()
 
 if(DEFINED ENV{BT_DEBUG_MODE})
     target_compile_definitions(hfp_746 PUBLIC
-        ENABLE_LOG_DEBUG
         ENABLE_LOG_INFO
         ENABLE_LOG_ERROR
         BT_DEBUG_MODE

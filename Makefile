@@ -1,7 +1,7 @@
 # pico-instal.sh is actual a wrapper script for the following command:
 # openocd -f interface/cmsis-dap.cfg -c "adapter speed 5000" -f target/rp2040.cfg -s tcl -c "program hfp_746.elf verify reset exit"
 
-.PHONY: build clean debug install-debug install
+.PHONY: build clean debug bt-debug install-debug install
 
 build:
 	mkdir -p build

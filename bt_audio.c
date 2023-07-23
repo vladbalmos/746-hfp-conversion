@@ -29,6 +29,7 @@ static dac_audio_buffer_pool_t *pool = NULL;
 
 // Holds stereo PCM data
 static int16_t pcm_data[DAC_BUFFER_MAX_SAMPLES * 2];
+// static int16_t pcm_data[DAC_BUFFER_MAX_SAMPLES];
 
 static spin_lock_t *sl;
 
@@ -47,6 +48,8 @@ static void bt_audio_fill_buffers(void){
 
         // Copy the left channel data
         for (int i = 0; i < pool->buffer_size * 2; i += 2) {
+        // // Prepare data for DAC
+        // for (int i = 0; i < pool->buffer_size; i ++) {
             uint16_t sample = ((pcm_data[i] + 32768) / 64) << 2;
             *b = sample;
             b++;

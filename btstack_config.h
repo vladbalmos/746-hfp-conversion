@@ -2,11 +2,9 @@
 #define _PICO_BTSTACK_BTSTACK_CONFIG_H
 
 // BTstack features that can be enabled
-#define ENABLE_LE_PERIPHERAL
-#define ENABLE_LE_CENTRAL
-#define ENABLE_L2CAP_LE_CREDIT_BASED_FLOW_CONTROL_MODE
 #define ENABLE_PRINTF_HEXDUMP
-#define ENABLE_SCO_OVER_HCI
+#define ENABLE_HFP_WIDE_BAND_SPEECH
+// #define ENABLE_L2CAP_ENHANCED_CREDIT_BASED_FLOW_CONTROL_MODE
 
 // BTstack configuration. buffers, sizes, ...
 #define HCI_OUTGOING_PRE_BUFFER_SIZE 4
@@ -31,7 +29,6 @@
 #define MAX_NR_SERVICE_RECORD_ITEMS 4
 #define MAX_NR_SM_LOOKUP_ENTRIES 3
 #define MAX_NR_WHITELIST_ENTRIES 16
-#define MAX_NR_LE_DEVICE_DB_ENTRIES 16
 
 // Limit number of ACL/SCO Buffer to use by stack to avoid cyw43 shared bus overrun
 #define MAX_NR_CONTROLLER_ACL_BUFFERS 3
@@ -60,6 +57,8 @@
 // Some USB dongles take longer to respond to HCI reset (e.g. BCM20702A).
 #define HCI_RESET_RESEND_TIMEOUT_MS 1000
 
+// #define HCI_INCOMING_PRE_BUFFER_SIZE 16
+
 #define ENABLE_SOFTWARE_AES128
 #define ENABLE_MICRO_ECC_FOR_LE_SECURE_CONNECTIONS
 
@@ -71,5 +70,8 @@
 #ifdef ENABLE_CLASSIC
 #define ENABLE_L2CAP_ENHANCED_RETRANSMISSION_MODE
 #endif
+#define ENABLE_SCO_OVER_PCM
+// #define ENABLE_BCM_PCM_WBS
+#define HCI_INCOMING_PRE_BUFFER_SIZE 14 // sizeof BNEP header, avoid memcpy
 
 #endif // MICROPY_INCLUDED_EXTMOD_BTSTACK_BTSTACK_CONFIG_H

@@ -1,4 +1,4 @@
-#include "pico/stdlib.h"
+#include <inttypes.h>
 
 // called every time the headset is taken/placed on/off hook
 typedef void (*dialer_headset_state_callback_t)(uint8_t state);
