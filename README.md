@@ -4,25 +4,9 @@ Firmware and hardware related resources to add hands-free bluetooth support to a
 
 ## Hardware requirements
 
-* Pico W
+* esp32 devboard
 * 746 telephone
-* pico probe (optional)
 
 ## Software dependencies
 
-* pico-sdk (1.5.0)
-* opencd (optional)
-* pico probe (optional)
-
-
-## Build
-
-    make build
-    
-## Install
-Via pico probe:
-
-    make install
-    
-BTN1: 21
-BTN2: 17
+* esp-idf (v5.1)
