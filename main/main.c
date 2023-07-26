@@ -24,6 +24,7 @@ void on_digit(uint8_t digit) {
 }
 
 void on_end_dialing(const char *number, uint8_t number_length) {
+    printf("End dialing\n");
     if (!number_length) {
         return;
     }

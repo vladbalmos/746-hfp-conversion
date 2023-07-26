@@ -54,14 +54,12 @@ static inline void reset_dialer_state() {
     reset_dialed_number();
     
     if (dialer_on_end != NULL) {
-        printf("Calling end callback from reset dialer start\n");
         dialer_on_end(NULL, 0);
     }
 }
 
 static void signal_end_dialing_timer_callback(void *arg) {
     if (dialer_on_end != NULL) {
-        printf("Calling end callback from end dialing timer\n");
         dialer_on_end(dialed_number, dialed_digits_counter);
     }
     
@@ -76,7 +74,6 @@ static void signal_digit_dialed_timer_callback(void *arg) {
     if (dialed_digits_counter >= (MAX_DIALED_NUMBER_LENGTH - 1)) {
         // Don't go past maximum number length
         esp_timer_stop(signal_end_dialing_timer);
-        printf("Calling end dialing timer directly\n");
         signal_end_dialing_timer_callback(NULL);
         return;
     }
@@ -85,7 +82,6 @@ static void signal_digit_dialed_timer_callback(void *arg) {
     }
     dialed_number[dialed_digits_counter++] = dialed_digit + '0';
     dialed_digit = -1;
-    printf("Scheduling end timer\n");
     ESP_ERROR_CHECK(esp_timer_start_once(signal_end_dialing_timer, SIGNAL_END_DIALING_TIMEOUT_MS * 1000));
     return;
 }
@@ -97,8 +93,12 @@ static void process_irq_events(void *arg) {
     uint8_t pin_level;
     
     while (1) {
-        BaseType_t r = xQueueReceive(irq_event_queue, &pin, portMAX_DELAY);
-        if (!r) {
+        uint8_t received = 0;
+        if (xQueueReceive(irq_event_queue, &pin, portMAX_DELAY)) {
+            pin_level = gpio_get_level(pin);
+            received = true;
+        }
+        if (!received) {
             continue;
         }
         
@@ -111,9 +111,6 @@ static void process_irq_events(void *arg) {
             continue;
         }
         
-        pin_level = gpio_get_level(pin);
-        
-        printf("Pin is %" PRId32 "\n", pin);
         if (pin == hook_switch_pin) {
             headset_state = pin_level;
             if (dialer_on_headset_state_change != NULL) {
@@ -122,6 +119,11 @@ static void process_irq_events(void *arg) {
             if (!headset_state && dialed_digits_counter) {
                 reset_dialer_state();
             }
+            continue;
+        }
+        
+        if (!headset_state) {
+            // Dialing not allowed unless the headset is off hook
             continue;
         }
         
@@ -147,7 +149,6 @@ static void process_irq_events(void *arg) {
             cancel_all_alarms();
             ESP_ERROR_CHECK(esp_timer_start_once(signal_digit_dialed_timer, SIGNAL_DIGIT_DIALED_TIMEOUT_MS * 1000));
         }
-        // printf("Rise: %d Fall: %d. Diff (us): %lld\n", event_mask == GPIO_IRQ_EDGE_RISE, event_mask == GPIO_IRQ_EDGE_FALL, diff_ms);
     }
 }
 
@@ -185,8 +186,8 @@ void dialer_init(uint8_t pin,
     io_conf.pull_down_en = 1;
     ESP_ERROR_CHECK(gpio_config(&io_conf));
 
-    ESP_ERROR_CHECK(gpio_isr_handler_add(dialer_pin, gpio_isr_handler, dialer_pin));
-    ESP_ERROR_CHECK(gpio_isr_handler_add(hook_switch_pin, gpio_isr_handler, hook_switch_pin));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(dialer_pin, gpio_isr_handler, (void *) dialer_pin));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(hook_switch_pin, gpio_isr_handler, (void *)hook_switch_pin));
     
     irq_event_queue = xQueueCreate(32, sizeof(uint32_t));
     
@@ -198,7 +199,10 @@ void dialer_init(uint8_t pin,
     
     BaseType_t result =  xTaskCreate(process_irq_events, "dial_proc_irq_ev", 2048, NULL, 10, NULL);
     assert(result == pdPASS);
+}
 
+uint8_t dialer_get_headset_state() {
+    return headset_state;
 }
 
 void dialer_enable(uint8_t status) {

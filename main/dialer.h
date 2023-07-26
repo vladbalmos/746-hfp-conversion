@@ -17,4 +17,5 @@ void dialer_init(uint8_t dialer_pin,
                  dialer_start_callback_t start_callback,
                  dialer_dialed_digit_callback_t digit_callback,
                  dialer_end_callback_t end_callback);
+uint8_t dialer_get_headset_state();
 void dialer_enable(uint8_t status);
