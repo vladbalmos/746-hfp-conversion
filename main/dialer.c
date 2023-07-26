@@ -13,8 +13,8 @@
 #define SIGNAL_END_DIALING_TIMEOUT_MS 2000
 
 static QueueHandle_t irq_event_queue = NULL;
-static uint8_t dialer_pin;
-static uint8_t hook_switch_pin;
+static gpio_num_t dialer_pin;
+static gpio_num_t hook_switch_pin;
 static uint8_t dialer_enabled = 0;
 static char dialed_number[MAX_DIALED_NUMBER_LENGTH];
 static int8_t dialed_digit = -1;
@@ -152,8 +152,8 @@ static void process_irq_events(void *arg) {
     }
 }
 
-void dialer_init(uint8_t pin,
-                 uint8_t hsw_pin,
+void dialer_init(gpio_num_t pin,
+                 gpio_num_t hsw_pin,
                  dialer_headset_state_callback_t on_headset_state_change_callback,
                  dialer_start_callback_t start_callback,
                  dialer_dialed_digit_callback_t digit_callback,

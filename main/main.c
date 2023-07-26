@@ -4,12 +4,13 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "dialer.h"
+#include "ringer.h"
 
 #define ESP_INTR_FLAG_DEFAULT 0
 #define DIALER_PULSE_PIN 16
 #define HOOK_SWITCH_PIN 17
-
-static uint32_t triggered = 0;
+#define RINGER_SIGNAL_PIN 5
+#define RINGER_ENABLE_PIN 18
 
 void on_headset_state_change(uint8_t state) {
     printf("Headset state change: %d\n", state);
@@ -37,7 +38,15 @@ void app_main(void) {
     dialer_init(DIALER_PULSE_PIN, HOOK_SWITCH_PIN, on_headset_state_change, on_start_dialing, on_digit, on_end_dialing);
     dialer_enable(1);
     
+    ringer_init(RINGER_ENABLE_PIN, RINGER_SIGNAL_PIN);
+    ringer_enable(1);
+    
+    // uint8_t ringer_state = 0;
+    
     while(1) {
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+        // ringer_state = !ringer_state;
+        // printf("Ringer state is %d\n", ringer_state);
+        // ringer_enable(ringer_state);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
     }
 }

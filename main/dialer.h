@@ -1,4 +1,5 @@
 #include <inttypes.h>
+#include "driver/gpio.h"
 
 // called every time the headset is taken/placed on/off hook
 typedef void (*dialer_headset_state_callback_t)(uint8_t state);
@@ -11,8 +12,8 @@ typedef void (*dialer_dialed_digit_callback_t)(uint8_t digit);
 typedef void (*dialer_end_callback_t)(const char *dialed_number, uint8_t number_length);
 
 
-void dialer_init(uint8_t dialer_pin,
-                 uint8_t hook_switch_pin,
+void dialer_init(gpio_num_t dialer_pin,
+                 gpio_num_t hook_switch_pin,
                  dialer_headset_state_callback_t headset_state_callback,
                  dialer_start_callback_t start_callback,
                  dialer_dialed_digit_callback_t digit_callback,
