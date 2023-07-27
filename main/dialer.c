@@ -11,6 +11,7 @@
 #define MAX_DIALED_NUMBER_LENGTH 33
 #define SIGNAL_DIGIT_DIALED_TIMEOUT_MS 250
 #define SIGNAL_END_DIALING_TIMEOUT_MS 2000
+#define HOOK_SWITCH_QUERY_STATE_TIMEOUT_MS 100
 
 static QueueHandle_t irq_event_queue = NULL;
 static gpio_num_t dialer_pin;
@@ -24,13 +25,14 @@ static uint8_t headset_state = 0;
 
 static esp_timer_handle_t signal_digit_dialed_timer;
 static esp_timer_handle_t signal_end_dialing_timer;
+static esp_timer_handle_t hook_switch_query_state_timer;
 
 static dialer_headset_state_callback_t dialer_on_headset_state_change = NULL;
 static dialer_start_callback_t dialer_on_start = NULL;
 static dialer_dialed_digit_callback_t dialer_on_digit = NULL;
 static dialer_end_callback_t dialer_on_end = NULL;
 
-static int64_t last_irq_event_time;
+static uint32_t last_irq_time_ms = 0;
 
 static inline void reset_dialed_number() {
     dialed_digits_counter = 0;
@@ -41,6 +43,14 @@ static inline void reset_dialed_number() {
 
 static void IRAM_ATTR gpio_isr_handler(void* arg) {
     uint32_t pin = (uint32_t) arg;
+    uint32_t now = xTaskGetTickCountFromISR() * portTICK_PERIOD_MS;
+    uint32_t diff_ms = now - last_irq_time_ms;
+    last_irq_time_ms = now;
+    
+    if (diff_ms < 20) {
+        return;
+    }
+
     xQueueSendFromISR(irq_event_queue, &pin, NULL);
 }
 
@@ -66,7 +76,21 @@ static void signal_end_dialing_timer_callback(void *arg) {
     reset_dialed_number();
 }
 
+static void check_hook_switch_state(void *arg) {
+    headset_state = gpio_get_level(hook_switch_pin);
+    if (dialer_on_headset_state_change != NULL) {
+        dialer_on_headset_state_change(headset_state);
+    }
+    if (!headset_state) {
+        reset_dialer_state();
+    }
+}
+
 static void signal_digit_dialed_timer_callback(void *arg) {
+    if (!headset_state) {
+        return;
+    }
+
     if (dialed_digit >= 10) {
         dialed_digit = 0;
     }
@@ -91,6 +115,7 @@ static void process_irq_events(void *arg) {
     int64_t now;
     int64_t diff_ms;
     uint8_t pin_level;
+    static int64_t last_event_time = 0;
     
     while (1) {
         uint8_t received = 0;
@@ -103,22 +128,12 @@ static void process_irq_events(void *arg) {
         }
         
         now = esp_timer_get_time();
-        diff_ms = (now - last_irq_event_time) / 1000;
-        last_irq_event_time = now;
-        
-        if (diff_ms < 20) {
-            // De-bounce
-            continue;
-        }
+        diff_ms = (now - last_event_time) / 1000;
+        last_event_time = now;
         
         if (pin == hook_switch_pin) {
-            headset_state = pin_level;
-            if (dialer_on_headset_state_change != NULL) {
-                dialer_on_headset_state_change(headset_state);
-            }
-            if (!headset_state && dialed_digits_counter) {
-                reset_dialer_state();
-            }
+            esp_timer_stop(hook_switch_query_state_timer);
+            ESP_ERROR_CHECK(esp_timer_start_once(hook_switch_query_state_timer, HOOK_SWITCH_QUERY_STATE_TIMEOUT_MS * 1000));
             continue;
         }
         
@@ -159,7 +174,6 @@ void dialer_init(gpio_num_t pin,
                  dialer_dialed_digit_callback_t digit_callback,
                  dialer_end_callback_t end_callback
 ) {
-    last_irq_event_time = esp_timer_get_time();
     reset_dialed_number();
     dialer_pin = pin;
     hook_switch_pin = hsw_pin;
@@ -172,11 +186,16 @@ void dialer_init(gpio_num_t pin,
     const esp_timer_create_args_t end_dialing_timer_args = {
         .callback = &signal_end_dialing_timer_callback,
         .arg = (void *) signal_end_dialing_timer,
-        .name = "digit-dialed"
+        .name = "end-dialing"
+    };
+    const esp_timer_create_args_t hook_switch_timer_args = {
+        .callback = &check_hook_switch_state,
+        .name = "check-hsw-state"
     };
     
     ESP_ERROR_CHECK(esp_timer_create(&digit_dialed_timer_args, &signal_digit_dialed_timer));
     ESP_ERROR_CHECK(esp_timer_create(&end_dialing_timer_args, &signal_end_dialing_timer));
+    ESP_ERROR_CHECK(esp_timer_create(&hook_switch_timer_args, &hook_switch_query_state_timer));
 
     gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_ANYEDGE;

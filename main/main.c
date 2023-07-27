@@ -38,15 +38,10 @@ void app_main(void) {
     dialer_init(DIALER_PULSE_PIN, HOOK_SWITCH_PIN, on_headset_state_change, on_start_dialing, on_digit, on_end_dialing);
     dialer_enable(1);
     
-    ringer_init(RINGER_ENABLE_PIN, RINGER_SIGNAL_PIN);
-    ringer_enable(1);
-    
-    // uint8_t ringer_state = 0;
+    // ringer_init(RINGER_ENABLE_PIN, RINGER_SIGNAL_PIN);
+    // ringer_enable(1);
     
     while(1) {
-        // ringer_state = !ringer_state;
-        // printf("Ringer state is %d\n", ringer_state);
-        // ringer_enable(ringer_state);
         vTaskDelay(2000 / portTICK_PERIOD_MS);
     }
 }
