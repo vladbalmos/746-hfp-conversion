@@ -75,9 +75,13 @@ void ringer_init(gpio_num_t en_pin, gpio_num_t sig_pin)
 
 void ringer_enable(uint8_t status) {
     uint8_t duty_cycle_percentage = (status) ? 50 : 0;
-    gpio_set_level(enable_pin, status);
     
     set_duty_cycle(duty_cycle_percentage);
+    
+    if (!status) {
+        ESP_ERROR_CHECK(ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0));
+    }
+    gpio_set_level(enable_pin, status);
     
     if (status) {
         last_ringing_state = 1;

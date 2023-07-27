@@ -14,6 +14,8 @@
 
 void on_headset_state_change(uint8_t state) {
     printf("Headset state change: %d\n", state);
+    
+    ringer_enable(!state);
 }
 
 void on_start_dialing() {
@@ -38,8 +40,8 @@ void app_main(void) {
     dialer_init(DIALER_PULSE_PIN, HOOK_SWITCH_PIN, on_headset_state_change, on_start_dialing, on_digit, on_end_dialing);
     dialer_enable(1);
     
-    // ringer_init(RINGER_ENABLE_PIN, RINGER_SIGNAL_PIN);
-    // ringer_enable(1);
+    ringer_init(RINGER_ENABLE_PIN, RINGER_SIGNAL_PIN);
+    printf("Headset state is %d\n", dialer_get_headset_state());
     
     while(1) {
         vTaskDelay(2000 / portTICK_PERIOD_MS);
