@@ -1,9 +1,10 @@
-#include <stdio.h>
 #include <inttypes.h>
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
+#include "esp_log.h"
+#include "ringer.h"
 
 #define RINGER_FREQ_HZ 20
 #define RINGER_ON_TIMEOUT_MS 2000
@@ -28,7 +29,7 @@ static ledc_channel_config_t pwm_channel;
 
 static void set_duty_cycle(uint8_t duty_cycle_percentage) {
     uint32_t duty_cycle = ((2 << (LEDC_TIMER_13_BIT - 1)) - 1) * (duty_cycle_percentage / 100.0);
-    printf("Setting duty cycle to %"PRId32"\n", duty_cycle);
+    ESP_LOGI(RG_TAG, "Setting duty cycle to %"PRId32, duty_cycle);
     ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty_cycle));
     ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0));
 }
