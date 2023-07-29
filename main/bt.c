@@ -1,7 +1,10 @@
+#define INCLUDE_vTaskSuspend 1
+
 #include <string.h>
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "freertos/ringbuf.h"
 #include "esp_bt_device.h"
@@ -17,7 +20,7 @@
 #define BT_DEVICE_NAME "GPO 746"
 #define BT_HFP_RINGBUF_SIZE 3600
 #define BT_AUDIO_BUF_POOL_SIZE 3
-#define BT_AUDIO_MAX_SAMPLES 512
+#define BT_AUDIO_MAX_SAMPLES 120
 
 const static char *c_hf_evt_str[] = {
     "CONNECTION_STATE_EVT",              /*!< connection state changed event */
@@ -59,53 +62,96 @@ const static char *c_audio_state_str[] = {
     "connected_msbc",
 };
 
+static TaskHandle_t bt_audio_out_task = NULL;
 static QueueHandle_t bt_msg_queue = NULL;
-static RingbufHandle_t m_rb = NULL;
 static dac_audio_buffer_pool_t *audio_out_buf_pool = NULL;
 static dac_audio_buffer_pool_t *audio_in_buf_pool = NULL;
 
-static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
-    if (!m_rb) {
-        return 0;
-    }
+static int rcv_buf_count = 0;
 
-    size_t item_size = 0;
-    uint8_t *data = xRingbufferReceiveUpTo(m_rb, &item_size, 0, sz);
-    if (item_size == sz) {
-        memcpy(p_buf, data, item_size);
-        vRingbufferReturnItem(m_rb, data);
-        return sz;
-    } else if (0 < item_size) {
-        vRingbufferReturnItem(m_rb, data);
-        return 0;
-    } else {
-        // data not enough, do not read
-        return 0;
+static void bt_audio_out_handler(void *arg) {
+    while (1) {
+        if (audio_out_buf_pool == NULL) {
+            vTaskSuspend(NULL);
+            continue;
+        }
+
+        if (!xSemaphoreTake(audio_out_buf_pool->ready_buff_sem, 0)) {
+            vTaskSuspend(NULL);
+            continue;
+        }
+
+        dac_audio_buffer_t *audio_buf = dac_audio_take_ready_buffer(audio_out_buf_pool);
+        xSemaphoreGive(audio_out_buf_pool->ready_buff_sem);
+
+        if (!xSemaphoreTake(audio_out_buf_pool->free_buff_sem, 0)) {
+            vTaskSuspend(NULL);
+            continue;
+        }
+        dac_audio_enqueue_free_buffer(audio_out_buf_pool,  audio_buf);
+        xSemaphoreGive(audio_out_buf_pool->free_buff_sem);
+        vTaskSuspend(NULL);
     }
 }
 
+static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
+    // ESP_LOGI(BT_TAG, "OUT Here here");
+    return 0;
+}
 
-static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t sz) {
-    if (!m_rb) {
+static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
+    if (!xSemaphoreTake(audio_out_buf_pool->free_buff_sem, 0)) {
+        // if (rcv_buf_count++ % 100 == 0) {
+            ESP_LOGI(BT_TAG, "Not working1");
+        // }
         return;
     }
-    BaseType_t done = xRingbufferSend(m_rb, (uint8_t *)buf, sz, 0);
-    if (!done) {
-        ESP_LOGE(BT_TAG, "rb send fail");
+    dac_audio_buffer_t *audio_buf = dac_audio_take_free_buffer(audio_out_buf_pool);
+    xSemaphoreGive(audio_out_buf_pool->free_buff_sem);
+
+    if (audio_buf == NULL) {
+        // if (rcv_buf_count++ % 100 == 0) {
+            ESP_LOGI(BT_TAG, "Not working2");
+        // }
+        return;
     }
-    esp_hf_client_outgoing_data_ready();
+    
+    uint16_t *src = (uint16_t *) buf;
+    uint16_t *dst = (uint16_t *) audio_buf->bytes;
+    
+    uint16_t samples_count = size / 2;
+    uint16_t max_size;
+    
+    if (samples_count > audio_buf->size) {
+        max_size = audio_buf->size;
+        ESP_LOGW(BT_TAG, "Audio buffer too small, increase size. Received samples: %d. Buffer max samples: %d", samples_count, audio_buf->size);
+    } else {
+        max_size = samples_count;
+    }
+
+    for (int i = 0; i < max_size; i++) {
+        *dst = ((src[i] + 32768) / 64) << 2;
+        dst++;
+    }
+    
+    if (!xSemaphoreTake(audio_out_buf_pool->ready_buff_sem, 0)) {
+        // if (rcv_buf_count++ % 100 == 0) {
+            ESP_LOGI(BT_TAG, "Not working3");
+        // }
+        return;
+    }
+    dac_audio_enqueue_ready_buffer(audio_out_buf_pool, audio_buf);
+    xSemaphoreGive(audio_out_buf_pool->ready_buff_sem);
+    vTaskResume(bt_audio_out_task);
+    if (rcv_buf_count++ % 100 == 0) {
+        ESP_LOGI(BT_TAG, "Working");
+    }
 }
 
 static void bt_hf_client_audio_open() {
-    m_rb = xRingbufferCreate(BT_HFP_RINGBUF_SIZE, RINGBUF_TYPE_BYTEBUF);
 }
 
 static void bt_hf_client_audio_close() {
-    if (!m_rb) {
-        return;
-    }
-
-    vRingbufferDelete(m_rb);
 }
 
 static void esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
@@ -274,8 +320,12 @@ void bt_task_send(bt_event_type_t ev, void *data, uint32_t data_size) {
 }
 
 void bt_init() {
+    BaseType_t r = xTaskCreate(bt_audio_out_handler, "bt_audio_out", 2048, NULL, configMAX_PRIORITIES - 4,  &bt_audio_out_task);
+    assert(r == pdPASS);
+    ESP_LOGI(BT_TAG, "Created audio out task");
+
     bt_msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
-    BaseType_t r = xTaskCreate(bt_msg_handler, "bt_msg_handler", 2048, NULL, configMAX_PRIORITIES - 3, NULL);
+    r = xTaskCreate(bt_msg_handler, "bt_msg_handler", 2048, NULL, configMAX_PRIORITIES - 3, NULL);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created bluetooth task");
     

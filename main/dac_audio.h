@@ -1,7 +1,9 @@
 #include <inttypes.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 typedef struct dac_audio_buffer {
-    int8_t *bytes;
+    uint8_t *bytes;
     uint16_t size;
     struct dac_audio_buffer *next;
     
@@ -10,9 +12,11 @@ typedef struct dac_audio_buffer {
 typedef struct dac_audio_buffer_pool {
     dac_audio_buffer_t *free_buffers_queue_head;
     dac_audio_buffer_t *free_buffers_queue_tail;
+    SemaphoreHandle_t free_buff_sem;
 
     dac_audio_buffer_t *ready_buffers_queue_head;
     dac_audio_buffer_t *ready_buffers_queue_tail;
+    SemaphoreHandle_t ready_buff_sem;
     
     uint8_t size;
     uint8_t available_buffers_count;

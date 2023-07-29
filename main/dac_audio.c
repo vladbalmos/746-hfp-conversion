@@ -17,7 +17,7 @@ static spi_bus_config_t spi_bus_cfg;
 static spi_device_interface_config_t spi_dev_cfg;
 
 static dac_audio_buffer_t *init_audio_buffer(uint16_t buffer_size) {
-    int8_t *bytes = heap_caps_malloc(buffer_size * sizeof(uint16_t), MALLOC_CAP_DMA);
+    uint8_t *bytes = heap_caps_malloc(buffer_size * sizeof(uint16_t), MALLOC_CAP_DMA);
     dac_audio_buffer_t *audio_buffer = malloc(sizeof(dac_audio_buffer_t));
     
     if (bytes == NULL) {
@@ -148,8 +148,13 @@ dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, uint16_t 
     }
     buffer_pool->free_buffers_queue_head = NULL;
     buffer_pool->free_buffers_queue_tail = NULL;
+    buffer_pool->free_buff_sem = xSemaphoreCreateBinary();
+    xSemaphoreGive(buffer_pool->free_buff_sem);
+
     buffer_pool->ready_buffers_queue_head = NULL;
     buffer_pool->ready_buffers_queue_tail = NULL;
+    buffer_pool->ready_buff_sem = xSemaphoreCreateBinary();
+    xSemaphoreGive(buffer_pool->ready_buff_sem);
 
     buffer_pool->ready_buffers_count = 0;
     buffer_pool->available_buffers_count = 0;
@@ -186,4 +191,13 @@ void dac_audio_init(dac_audio_sample_rate_t sample_rate) {
     
     ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
     ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &spi_dev_cfg, &spi));
+    
+    int freq_khz;
+    size_t max_tx_length;
+
+    ESP_ERROR_CHECK(spi_device_get_actual_freq(spi, &freq_khz));
+    ESP_LOGI(DA_TAG, "Actual SPI transfer frequency %dKHZ", freq_khz);
+
+    ESP_ERROR_CHECK(spi_bus_get_max_transaction_len(HSPI_HOST, &max_tx_length));
+    ESP_LOGI(DA_TAG, "Max SPI transaction length: %d bytes", max_tx_length);
 }
