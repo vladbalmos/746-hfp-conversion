@@ -117,8 +117,9 @@ void app_main(void) {
 
         uint16_t *dst = (uint16_t *) buf->bytes;
         for (int i = 0; i < buf->samples; i++) {
-            uint16_t val = buff[i];
-            *dst = ((val & 0xff) << 8) | ((val >> 8) & 0xff);
+            uint16_t val = samples_buf[i];
+            *dst = val;
+            // *dst = ((val & 0xff) << 8) | ((val >> 8) & 0xff);
             dst++;
         }
         
