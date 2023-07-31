@@ -125,7 +125,7 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
 
     for (int i = 0; i < max_size; i++) {
         *dst = ((src[i] + 32768) / 64) << 2;
-        // *dst = ((src[i] + 32768) / 64) << 2;
+        // *dst = ((*dst & 0xff) << 8) | ((*dst >> 8) & 0xff);
         // if (src[i] != 0) {
         //     ESP_LOGI(BT_TAG, "% 5d % 5d", *dst, src[i]);
         // }

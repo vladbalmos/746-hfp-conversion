@@ -88,80 +88,80 @@ void app_main(void) {
     ringer_init(RINGER_ENABLE_PIN, RINGER_SIGNAL_PIN);
     ESP_LOGI(TAG, "Headset state is %d", dialer_get_headset_state());
 
-    int max_samples = SAMPLE_RATE / SINE_WAVE_FREQ_HZ + 1;
-    buff = malloc(max_samples * sizeof(int16_t));
-    assert(buff != NULL);
-    uint16_t samples = utils_generate_sine_wave(SINE_WAVE_FREQ_HZ, (uint16_t *)buff, SAMPLE_RATE);
+    // int max_samples = SAMPLE_RATE / SINE_WAVE_FREQ_HZ + 1;
+    // buff = malloc(max_samples * sizeof(int16_t));
+    // assert(buff != NULL);
+    // uint16_t samples = utils_generate_sine_wave(SINE_WAVE_FREQ_HZ, (uint16_t *)buff, SAMPLE_RATE);
 
     
-    printf("Total samples: %d\n", samples);
-    uint16_t *samples_buf = (uint16_t *) buff;
-    for (int i = 0; i < samples; i++) {
-        printf("% 5d ", samples_buf[i]);
+    // printf("Total samples: %d\n", samples);
+    // uint16_t *samples_buf = (uint16_t *) buff;
+    // for (int i = 0; i < samples; i++) {
+    //     printf("% 5d ", samples_buf[i]);
         
-        if (i && i % 15 == 0) {
-            printf("\n");
-        }
-    }
-    printf("\n");
+    //     if (i && i % 15 == 0) {
+    //         printf("\n");
+    //     }
+    // }
+    // printf("\n");
     
-    dac_audio_buffer_pool_t *pool = dac_audio_init_buffer_pool(3, samples);
-    dac_audio_init(DAC_SAMPLE_RATE_16KHZ);
+    // dac_audio_buffer_pool_t *pool = dac_audio_init_buffer_pool(3, samples);
+    // dac_audio_init(DAC_SAMPLE_RATE_16KHZ);
     
-    while (1) {
-        dac_audio_buffer_t *buf = dac_audio_take_free_buffer_safe(pool, portMAX_DELAY);
-        if (buf == NULL) {
-            // ESP_LOGE(TAG, "Free buffer not available");
-            continue;
-        }
+    // while (1) {
+    //     dac_audio_buffer_t *buf = dac_audio_take_free_buffer_safe(pool, portMAX_DELAY);
+    //     if (buf == NULL) {
+    //         // ESP_LOGE(TAG, "Free buffer not available");
+    //         continue;
+    //     }
 
-        uint16_t *dst = (uint16_t *) buf->bytes;
-        for (int i = 0; i < buf->samples; i++) {
-            uint16_t val = samples_buf[i];
-            *dst = val;
-            // *dst = ((val & 0xff) << 8) | ((val >> 8) & 0xff);
-            dst++;
-        }
+    //     uint16_t *dst = (uint16_t *) buf->bytes;
+    //     for (int i = 0; i < buf->samples; i++) {
+    //         uint16_t val = samples_buf[i];
+    //         *dst = val;
+    //         // *dst = ((val & 0xff) << 8) | ((val >> 8) & 0xff);
+    //         dst++;
+    //     }
         
-        dac_audio_send(pool, buf);
-        vTaskDelay(10 / portTICK_PERIOD_MS);
-    }
+    //     dac_audio_send(pool, buf);
+    //     vTaskDelay(10 / portTICK_PERIOD_MS);
+    // }
     
     
     // Bluetooth initialization
-    // esp_err_t ret = nvs_flash_init();
-    // if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
-    //     ESP_ERROR_CHECK(nvs_flash_erase());
-    //     ret = nvs_flash_init();
-    // }
-    // ESP_ERROR_CHECK( ret );
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK( ret );
 
-    // ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
+    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
     
-    // esp_err_t err;
-    // esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    // if ((err = esp_bt_controller_init(&bt_cfg)) != ESP_OK) {
-    //     ESP_LOGE(TAG, "%s initialize controller failed: %s\n", __func__, esp_err_to_name(ret));
-    //     return;
-    // }
+    esp_err_t err;
+    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+    if ((err = esp_bt_controller_init(&bt_cfg)) != ESP_OK) {
+        ESP_LOGE(TAG, "%s initialize controller failed: %s\n", __func__, esp_err_to_name(ret));
+        return;
+    }
 
-    // if ((err = esp_bt_controller_enable(ESP_BT_MODE_CLASSIC_BT)) != ESP_OK) {
-    //     ESP_LOGE(TAG, "%s enable controller failed: %s\n", __func__, esp_err_to_name(ret));
-    //     return;
-    // }
+    if ((err = esp_bt_controller_enable(ESP_BT_MODE_CLASSIC_BT)) != ESP_OK) {
+        ESP_LOGE(TAG, "%s enable controller failed: %s\n", __func__, esp_err_to_name(ret));
+        return;
+    }
 
-    // if ((err = esp_bluedroid_init()) != ESP_OK) {
-    //     ESP_LOGE(TAG, "%s initialize bluedroid failed: %s\n", __func__, esp_err_to_name(ret));
-    //     return;
-    // }
+    if ((err = esp_bluedroid_init()) != ESP_OK) {
+        ESP_LOGE(TAG, "%s initialize bluedroid failed: %s\n", __func__, esp_err_to_name(ret));
+        return;
+    }
 
-    // if ((err = esp_bluedroid_enable()) != ESP_OK) {
-    //     ESP_LOGE(TAG, "%s enable bluedroid failed: %s\n", __func__, esp_err_to_name(ret));
-    //     return;
-    // }
-    // bt_init();
+    if ((err = esp_bluedroid_enable()) != ESP_OK) {
+        ESP_LOGE(TAG, "%s enable bluedroid failed: %s\n", __func__, esp_err_to_name(ret));
+        return;
+    }
+    bt_init();
     
-    // while(1) {
-    //     vTaskDelay(2000 / portTICK_PERIOD_MS);
-    // }
+    while(1) {
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+    }
 }

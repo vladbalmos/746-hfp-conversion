@@ -246,24 +246,15 @@ void dac_audio_send(dac_audio_buffer_pool_t *pool, dac_audio_buffer_t *buf) {
     free_buf_msgs[spi_tx_index].buf = buf;
 
     tx->user = &free_buf_msgs[spi_tx_index];
-    // tx->tx_buffer = buf->bytes;
-    tx->tx_data[0] = buf->bytes[1];
-    tx->tx_data[1] = buf->bytes[0];
-    tx->tx_data[2] = buf->bytes[3];
-    tx->tx_data[3] = buf->bytes[2];
-    ESP_LOGI(DA_TAG, "%d %d %d %d", buf->bytes[0], buf->bytes[1], buf->bytes[2], buf->bytes[3]);
+    tx->tx_buffer = buf->bytes;
     tx->rx_buffer = NULL;
-    tx->length = 32;
-    // tx->length = buf->size * 8;
-    // tx->flags = 0;
-    tx->flags = SPI_TRANS_USE_TXDATA;
+    tx->length = buf->size * 8;
+    tx->flags = 0;
     
-    esp_err_t result = spi_device_transmit(spi, tx);
-
     spi_tx_index++;
     
-    // esp_err_t result = spi_device_queue_trans(spi, tx, portMAX_DELAY);
-    // spi_device_get_trans_result(spi, &tx, portMAX_DELAY);
+    esp_err_t result = spi_device_queue_trans(spi, tx, portMAX_DELAY);
+
     if (result == ESP_OK) {
         // ESP_LOGI(DA_TAG, "Sent buffer");
         return;
@@ -356,20 +347,20 @@ void dac_audio_init(dac_audio_sample_rate_t sample_rate) {
     spi_bus_cfg.sclk_io_num = CLK_PIN;
     spi_bus_cfg.quadwp_io_num = -1;
     spi_bus_cfg.quadhd_io_num = -1;
-    spi_bus_cfg.max_transfer_sz = 4096;
+    spi_bus_cfg.max_transfer_sz = 240;
     
     // Setup device
     // spi_dev_cfg.clock_speed_hz = sizeof(uint16_t) * 8 * ((sample_rate == DAC_SAMPLE_RATE_16KHZ) ? 16 : 44) * 1000;
-    spi_dev_cfg.clock_speed_hz = 500 * 1000;
+    spi_dev_cfg.clock_speed_hz = 1000 * 1000;
     spi_dev_cfg.mode = 0;
     spi_dev_cfg.spics_io_num = CS_PIN;
     spi_dev_cfg.queue_size = SPI_QUEUE_SIZE;
-    // spi_dev_cfg.flags = SPI_DEVICE_NO_RETURN_RESULT;
+    // spi_dev_cfg.flags = SPI_DEVICE_NO_RETURN_RESULT | SPI_DEVICE_NO_DUMMY | SPI_DEVICE_BIT_LSBFIRST;
     spi_dev_cfg.post_cb = &post_spi_tx_callback;
     
     ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
     ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &spi_dev_cfg, &spi));
-    // ESP_ERROR_CHECK(spi_device_acquire_bus(spi, portMAX_DELAY));
+    ESP_ERROR_CHECK(spi_device_acquire_bus(spi, portMAX_DELAY));
 
     int freq_khz;
     size_t max_tx_length;
