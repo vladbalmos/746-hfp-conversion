@@ -4,32 +4,25 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "driver/spi_master.h"
+#include "driver/dac_continuous.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "dac_audio.h"
 
 #define DA_TAG "DA"
+#define DAC_DESCRIPTORS_NUM 8
 
-#define MISO_PIN 12
-#define MOSI_PIN 13
-#define CLK_PIN 14
-#define CS_PIN 15
-#define SPI_QUEUE_SIZE 16
-// #define SPI_QUEUE_SIZE 2
-
-static spi_device_handle_t spi;
-static spi_bus_config_t spi_bus_cfg;
-static spi_device_interface_config_t spi_dev_cfg;
-static spi_transaction_t spi_transactions[SPI_QUEUE_SIZE];
-static dac_audio_free_buf_msg_t free_buf_msgs[SPI_QUEUE_SIZE];
-static uint8_t spi_tx_index = 0;
-static QueueHandle_t buffers_to_free_queue = NULL;
 static int64_t last_incoming_buffer_us = 0;
-static int sent_buf_count = 0;
 
-// static uint8_t bytes[4] = {250, 2048, 4095, 1024};
+
+static dac_continuous_handle_t dac_handle;
+static dac_continuous_config_t dac_config;
+static TaskHandle_t audio_consumer_task;
+
+static QueueHandle_t dac_events_queue = NULL;
+static QueueHandle_t buffers_to_free_queue = NULL;
+static int sent_buf_count = 0;
 
 static void free_buffers_task_handler(void *arg) {
     dac_audio_free_buf_msg_t msg;
@@ -40,11 +33,60 @@ static void free_buffers_task_handler(void *arg) {
         }
         
         dac_audio_enqueue_free_buffer_safe(msg.pool, msg.buf, portMAX_DELAY);
+        // ESP_LOGW(DA_TAG, "Releasing buffer");
     }
 }
 
-static dac_audio_buffer_t *init_audio_buffer(uint16_t buffer_size) {
-    uint8_t *bytes = heap_caps_malloc(buffer_size * sizeof(uint16_t), MALLOC_CAP_DMA);
+static void consume_buffers_task_handler(void *arg) {
+    dac_audio_buffer_pool_t *pool = (dac_audio_buffer_pool_t *) arg;
+    while (1) {
+        dac_audio_buffer_t *audio_buf = dac_audio_take_ready_buffer_safe(pool, 0);
+        if (audio_buf == NULL) {
+            // ESP_LOGI(DA_TAG, "No audio buffer present");
+            vTaskDelay(1);
+            continue;
+        }
+        
+        dac_event_data_t evt_data;
+        size_t bytes_written = 0;
+
+        
+        while (bytes_written < audio_buf->size) {
+            if (xQueueReceive(dac_events_queue, &evt_data, 0) != pdTRUE) {
+                break;
+            }
+            size_t loaded_bytes = 0;
+            ESP_ERROR_CHECK(
+                dac_continuous_write_asynchronously(dac_handle, evt_data.buf, evt_data.buf_size,
+                                                    audio_buf->bytes + bytes_written, audio_buf->size - bytes_written,
+                                                    &loaded_bytes)
+            );
+            bytes_written += loaded_bytes;
+        }
+
+        // ESP_LOGI(DA_TAG, "Wrote data");
+        dac_audio_schedule_used_buf_release(pool, audio_buf, 0);
+    }
+}
+
+static bool IRAM_ATTR dac_on_conversion_done_callback(dac_continuous_handle_t handle, const dac_event_data_t *event, void *user_data) {
+    QueueHandle_t que = (QueueHandle_t)user_data;
+    BaseType_t need_awoke;
+
+    /* When the queue is full, drop the oldest item */
+    if (xQueueIsQueueFullFromISR(que)) {
+        dac_event_data_t dummy;
+        xQueueReceiveFromISR(que, &dummy, &need_awoke);
+    }
+
+    /* Send the event from callback */
+    xQueueSendFromISR(que, event, &need_awoke);
+    return need_awoke;
+}
+
+static dac_audio_buffer_t *init_audio_buffer(size_t buffer_size) {
+    // uint8_t *bytes = heap_caps_malloc(buffer_size, MALLOC_CAP_DMA);
+    uint8_t *bytes = malloc(buffer_size);
     dac_audio_buffer_t *audio_buffer = malloc(sizeof(dac_audio_buffer_t));
     
     if (bytes == NULL) {
@@ -56,8 +98,7 @@ static dac_audio_buffer_t *init_audio_buffer(uint16_t buffer_size) {
     }
     
     audio_buffer->bytes = bytes;
-    audio_buffer->samples = buffer_size;
-    audio_buffer->size = buffer_size * sizeof(uint16_t);
+    audio_buffer->size = buffer_size;
     audio_buffer->next = NULL;
     return audio_buffer;
 }
@@ -200,76 +241,6 @@ uint8_t dac_audio_remaining_ready_buffer_slots(dac_audio_buffer_pool_t *pool) {
     return pool->size - pool->ready_buffers_count;
 }
 
-static void IRAM_ATTR post_spi_tx_callback(spi_transaction_t *tx) {
-    spi_tx_index--;
-
-    int64_t now = esp_timer_get_time();
-    int64_t interval = now - last_incoming_buffer_us;
-    last_incoming_buffer_us = now;
-    if (sent_buf_count++ % 100 == 0) {
-        ESP_DRAM_LOGI(DA_TAG, "Send interval %"PRId64, interval);
-    }
-    // ESP_DRAM_LOGI(DA_TAG, "Finished sending buffer %"PRId64, interval);
-    
-    dac_audio_free_buf_msg_t *msg = (dac_audio_free_buf_msg_t *) tx->user;
-    dac_audio_schedule_used_buf_release(msg->pool, msg->buf, 1);
-}
-
-void dac_audio_send_simple(uint8_t b1, uint8_t b2) {
-    spi_transaction_t *tx = &spi_transactions[spi_tx_index];
-    memset(tx, 0, sizeof(spi_transaction_t));
-
-    tx->tx_buffer = NULL;
-    tx->rx_buffer = NULL;
-    tx->tx_data[0] = b1;
-    tx->tx_data[1] = b2;
-    tx->length = 16;
-    tx->flags = SPI_TRANS_USE_TXDATA;
-
-    esp_err_t result = spi_device_transmit(spi, tx);
-    if (result == ESP_OK) {
-        // ESP_LOGI(DA_TAG, "Sent buffer");
-    }
-}
-
-void dac_audio_send(dac_audio_buffer_pool_t *pool, dac_audio_buffer_t *buf) {
-    if (spi_tx_index == (SPI_QUEUE_SIZE - 1)) {
-        ESP_LOGE(DA_TAG, "Too many queued SPI transactions");
-        goto free_buffer;
-    }
-    
-    spi_transaction_t *tx = &spi_transactions[spi_tx_index];
-    memset(tx, 0, sizeof(spi_transaction_t));
-    
-    // Prepare scheduling audio buffer release after transmit
-    free_buf_msgs[spi_tx_index].pool = pool;
-    free_buf_msgs[spi_tx_index].buf = buf;
-
-    tx->user = &free_buf_msgs[spi_tx_index];
-    tx->tx_buffer = buf->bytes;
-    tx->rx_buffer = NULL;
-    tx->length = buf->size * 8;
-    tx->flags = 0;
-    
-    spi_tx_index++;
-    
-    esp_err_t result = spi_device_queue_trans(spi, tx, portMAX_DELAY);
-
-    if (result == ESP_OK) {
-        // ESP_LOGI(DA_TAG, "Sent buffer");
-        return;
-    }
-    
-    ESP_LOGE(DA_TAG, "Unable to queue spi transaction. Error: %d", result);
-    // Reset the tx index counter
-    spi_tx_index--;
-
-    ESP_LOGE(DA_TAG, "Error: %d", result);
-    
-    free_buffer:
-        dac_audio_schedule_used_buf_release(pool, buf, 0);
-}
-
 void dac_audio_reset_buffer_pool(dac_audio_buffer_pool_t *pool) {
     while (pool->ready_buffers_count) {
         assert(dac_audio_enqueue_free_buffer(pool, dac_audio_take_ready_buffer(pool)) == 1);
@@ -281,7 +252,7 @@ void dac_audio_reset_buffer_pool(dac_audio_buffer_pool_t *pool) {
     ESP_LOGD(DA_TAG, "Remaining ready buffer slots %d", dac_audio_remaining_ready_buffer_slots(pool));
 }
 
-dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, uint16_t buffer_size) {
+dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, size_t buffer_size) {
     dac_audio_buffer_pool_t *buffer_pool = malloc(sizeof(dac_audio_buffer_pool_t));
     
 
@@ -333,7 +304,11 @@ void dac_audio_schedule_used_buf_release(dac_audio_buffer_pool_t *return_pool, d
     }
 }
 
-void dac_audio_init(dac_audio_sample_rate_t sample_rate) {
+void dac_audio_send(uint8_t *buf, size_t size) {
+    dac_continuous_write(dac_handle, buf, size, NULL, -1);
+}
+
+void dac_audio_init(dac_audio_sample_rate_t sample_rate, dac_audio_buffer_pool_t *buffer_pool, size_t buffer_size) {
     // Create task to free used buffers
     buffers_to_free_queue = xQueueCreate(8, sizeof(dac_audio_free_buf_msg_t));
     assert(buffers_to_free_queue != NULL);
@@ -341,33 +316,39 @@ void dac_audio_init(dac_audio_sample_rate_t sample_rate) {
     BaseType_t r = xTaskCreate(free_buffers_task_handler, "free_buf", 2048, NULL, 10, NULL);
     assert(r == pdPASS);
 
-    // Setup bus
-    spi_bus_cfg.miso_io_num = MISO_PIN; // we're not interested in reading
-    spi_bus_cfg.mosi_io_num = MOSI_PIN;
-    spi_bus_cfg.sclk_io_num = CLK_PIN;
-    spi_bus_cfg.quadwp_io_num = -1;
-    spi_bus_cfg.quadhd_io_num = -1;
-    spi_bus_cfg.max_transfer_sz = 240;
+    // Create task & queue to consume audio buffers
+    dac_events_queue = xQueueCreate(8, sizeof(dac_event_data_t));
+    assert(dac_events_queue != NULL);
+
+    r = xTaskCreatePinnedToCore(consume_buffers_task_handler, "consume_buf", 4096, buffer_pool, 15, &audio_consumer_task, 1);
+    assert(r == pdPASS);
+    vTaskSuspend(audio_consumer_task);
     
-    // Setup device
-    // spi_dev_cfg.clock_speed_hz = sizeof(uint16_t) * 8 * ((sample_rate == DAC_SAMPLE_RATE_16KHZ) ? 16 : 44) * 1000;
-    spi_dev_cfg.clock_speed_hz = 1000 * 1000;
-    spi_dev_cfg.mode = 0;
-    spi_dev_cfg.spics_io_num = CS_PIN;
-    spi_dev_cfg.queue_size = SPI_QUEUE_SIZE;
-    // spi_dev_cfg.flags = SPI_DEVICE_NO_RETURN_RESULT | SPI_DEVICE_NO_DUMMY | SPI_DEVICE_BIT_LSBFIRST;
-    spi_dev_cfg.post_cb = &post_spi_tx_callback;
+    // Init dac
+    dac_config.chan_mask = DAC_CHANNEL_MASK_CH0;
+    dac_config.desc_num = DAC_DESCRIPTORS_NUM;
+    dac_config.buf_size = buffer_size;
+    // dac_config.buf_size = 240;
+    dac_config.freq_hz = (sample_rate == DAC_SAMPLE_RATE_16KHZ) ? 16000 : 44100;
+    dac_config.clk_src = DAC_DIGI_CLK_SRC_APLL;
+    ESP_ERROR_CHECK(dac_continuous_new_channels(&dac_config, &dac_handle));
     
-    ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
-    ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &spi_dev_cfg, &spi));
-    ESP_ERROR_CHECK(spi_device_acquire_bus(spi, portMAX_DELAY));
+    dac_event_callbacks_t dac_callbacks = {
+        .on_convert_done = dac_on_conversion_done_callback,
+        .on_stop = NULL,
+    };
 
-    int freq_khz;
-    size_t max_tx_length;
+    ESP_ERROR_CHECK(dac_continuous_register_event_callback(dac_handle, &dac_callbacks, dac_events_queue));
+}
 
-    ESP_ERROR_CHECK(spi_device_get_actual_freq(spi, &freq_khz));
-    ESP_LOGI(DA_TAG, "Actual SPI transfer frequency %dKHZ", freq_khz);
-
-    ESP_ERROR_CHECK(spi_bus_get_max_transaction_len(HSPI_HOST, &max_tx_length));
-    ESP_LOGI(DA_TAG, "Max SPI transaction length: %d bytes", max_tx_length);
+void dac_audio_enable(uint8_t status) {
+    if (status) {
+        vTaskResume(audio_consumer_task);
+        ESP_ERROR_CHECK(dac_continuous_enable(dac_handle));
+        ESP_ERROR_CHECK(dac_continuous_start_async_writing(dac_handle));
+        return;
+    }
+    vTaskResume(audio_consumer_task);
+    ESP_ERROR_CHECK(dac_continuous_stop_async_writing(dac_handle));
+    ESP_ERROR_CHECK(dac_continuous_disable(dac_handle));
 }

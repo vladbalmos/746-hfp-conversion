@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "driver/dac_continuous.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
 #include "nvs.h"
@@ -46,7 +47,7 @@ void on_end_dialing(const char *number, uint8_t number_length) {
 }
 
 #define PI 3.14159265
-#define SINE_WAVE_FREQ_HZ 500
+#define SINE_WAVE_FREQ_HZ 400
 #define SINE_MAX_VAL (2 << 15) - 1
 #define SAMPLE_RATE 16000
 
@@ -61,13 +62,27 @@ void on_end_dialing(const char *number, uint8_t number_length) {
 //     return samples;
 // }
 
+static bool IRAM_ATTR  dac_on_convert_done_callback(dac_continuous_handle_t handle, const dac_event_data_t *event, void *user_data)
+{
+    QueueHandle_t que = (QueueHandle_t)user_data;
+    BaseType_t need_awoke;
+    /* When the queue is full, drop the oldest item */
+    if (xQueueIsQueueFullFromISR(que)) {
+        dac_event_data_t dummy;
+        xQueueReceiveFromISR(que, &dummy, &need_awoke);
+    }
+    /* Send the event from callback */
+    xQueueSendFromISR(que, event, &need_awoke);
+    return need_awoke;
+}
+
 uint16_t utils_generate_sine_wave(uint16_t frequency, uint16_t *buffer, uint16_t sample_rate) {
     const uint16_t samples = sample_rate / frequency;
     
     for (uint16_t i = 0; i < samples; i++) {
         double angle = (double)i / (double)samples * 2.0 * PI;
         double sine_val = sin(angle);
-        int val = round((sine_val + 1.0) / 2.0 * 4092);
+        int val = round((sine_val + 1.0) / 2.0 * 65535);
         if (val < 0) {
             val = 0;
         }
@@ -77,6 +92,7 @@ uint16_t utils_generate_sine_wave(uint16_t frequency, uint16_t *buffer, uint16_t
 }
 
 static uint8_t *buff = NULL;
+static uint8_t big_buff[240];
 
 void app_main(void) {
     // Initialize phone interface
@@ -89,14 +105,20 @@ void app_main(void) {
     ESP_LOGI(TAG, "Headset state is %d", dialer_get_headset_state());
 
     // int max_samples = SAMPLE_RATE / SINE_WAVE_FREQ_HZ + 1;
-    // buff = malloc(max_samples * sizeof(int16_t));
+    // int buffer_size = max_samples * sizeof(int16_t);
+    // buff = malloc(buffer_size);
     // assert(buff != NULL);
     // uint16_t samples = utils_generate_sine_wave(SINE_WAVE_FREQ_HZ, (uint16_t *)buff, SAMPLE_RATE);
 
+
     
     // printf("Total samples: %d\n", samples);
+    // printf("Samples 16bit: \n");
     // uint16_t *samples_buf = (uint16_t *) buff;
+    // uint8_t sine_buf[samples];
+
     // for (int i = 0; i < samples; i++) {
+    //     sine_buf[i] = (uint8_t) (samples_buf[i] >> 8);
     //     printf("% 5d ", samples_buf[i]);
         
     //     if (i && i % 15 == 0) {
@@ -104,27 +126,64 @@ void app_main(void) {
     //     }
     // }
     // printf("\n");
+
+    // for (int i = 0; i < 7; i++) {
+    //     for (int j = 0; j < 40; j++) {
+    //         int index = (40 * i) + j;
+    //         // printf("%d\n", index);
+    //         big_buff[index] = sine_buf[j];
+    //     }
+    // }
+
+    // printf("Samples 8bit: \n");
+    // for (int i = 0; i < 224; i++) {
+    //     printf("% 5d ", big_buff[i]);
+        
+    //     if (i && i % 15 == 0) {
+    //         printf("\n");
+    //     }
+    // }
+    // printf("\n");
+
     
-    // dac_audio_buffer_pool_t *pool = dac_audio_init_buffer_pool(3, samples);
-    // dac_audio_init(DAC_SAMPLE_RATE_16KHZ);
+    // dac_continuous_handle_t dac_handle;
+    // dac_continuous_config_t dac_cfg = {
+    //     .chan_mask = DAC_CHANNEL_MASK_CH0,
+    //     .desc_num = 4,
+    //     .buf_size = 240,
+    //     .freq_hz = SAMPLE_RATE,
+    //     .clk_src = DAC_DIGI_CLK_SRC_APLL,
+    // };
+    // ESP_ERROR_CHECK(dac_continuous_new_channels(&dac_cfg, &dac_handle));
+    
+    // QueueHandle_t q = xQueueCreate(10, sizeof(dac_event_data_t));
+    
+    // dac_event_callbacks_t cbs = {
+    //     .on_convert_done = dac_on_convert_done_callback,
+    //     .on_stop = NULL,
+    // };
+    // ESP_ERROR_CHECK(dac_continuous_register_event_callback(dac_handle, &cbs, q));
+    // ESP_ERROR_CHECK(dac_continuous_enable(dac_handle));
+    // ESP_ERROR_CHECK(dac_continuous_start_async_writing(dac_handle));
     
     // while (1) {
-    //     dac_audio_buffer_t *buf = dac_audio_take_free_buffer_safe(pool, portMAX_DELAY);
-    //     if (buf == NULL) {
-    //         // ESP_LOGE(TAG, "Free buffer not available");
-    //         continue;
-    //     }
+    //     dac_event_data_t evt_data;
+    //     size_t bytes_written = 0;
 
-    //     uint16_t *dst = (uint16_t *) buf->bytes;
-    //     for (int i = 0; i < buf->samples; i++) {
-    //         uint16_t val = samples_buf[i];
-    //         *dst = val;
-    //         // *dst = ((val & 0xff) << 8) | ((val >> 8) & 0xff);
-    //         dst++;
+    //     while (bytes_written < 240) {
+    //         if (xQueueReceive(q, &evt_data, portMAX_DELAY) != pdTRUE) {
+    //             break;
+    //         }
+    //         size_t loaded_bytes = 0;
+    //         ESP_ERROR_CHECK(
+    //             dac_continuous_write_asynchronously(dac_handle, evt_data.buf, evt_data.buf_size,
+    //                                                 big_buff + bytes_written, samples - bytes_written,
+    //                                                 &loaded_bytes)
+    //         );
+    //         bytes_written += loaded_bytes;
+    //         // ESP_LOGI(TAG, "%d %d", evt_data.buf_size, samples);
     //     }
-        
-    //     dac_audio_send(pool, buf);
-    //     vTaskDelay(10 / portTICK_PERIOD_MS);
+    //     vTaskDelay(0);
     // }
     
     
