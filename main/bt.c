@@ -174,6 +174,7 @@ const char *c_inband_ring_state_str[] = {
 
 // static TaskHandle_t bt_audio_out_task = NULL;
 static QueueHandle_t bt_msg_queue = NULL;
+static QueueHandle_t bt_outgoing_msg_queue = NULL;
 static dac_audio_buffer_pool_t *audio_out_buf_pool = NULL;
 static dac_audio_buffer_pool_t *audio_in_buf_pool = NULL;
 static dac_audio_buffer_t *buffer_out = NULL;
@@ -199,9 +200,32 @@ static uint16_t utils_generate_sine_wave(uint16_t frequency, uint16_t *buffer, u
     return samples;
 }
 
+bt_msg_t bt_create_msg(bt_event_type_t ev, void *data, size_t data_size) {
+    bt_msg_t msg;
+
+    memset(&msg, 0, sizeof(bt_msg_t));
+    msg.ev = ev;
+    msg.data_size = data_size;
+    
+    if (!data_size) {
+        return msg;
+    }
+
+    msg.data = malloc(data_size);
+    assert(msg.data != NULL);
+    memcpy(msg.data, data, data_size);
+    return msg;
+}
+
 static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
     // ESP_LOGI(BT_TAG, "OUT Here here");
     return 0;
+}
+
+static void send_outgoing_message(bt_event_type_t ev, void *data, size_t data_size) {
+    bt_msg_t msg = bt_create_msg(ev, data, 0);
+    xQueueSend(bt_outgoing_msg_queue, &msg, BT_QUEUE_ADD_MAX_WAIT_TICKS / portTICK_PERIOD_MS);
+    ESP_LOGW(BT_TAG, "Sent incoming call %d", ev);
 }
 
 static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
@@ -406,6 +430,11 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
 
         case ESP_HF_CLIENT_CIND_CALL_EVT:
         {
+            if (param->call.status == ESP_HF_CALL_STATUS_NO_CALLS) {
+                send_outgoing_message(BT_EV_CALL_HANGUP, NULL, 0);
+            } else if (param->call.status == ESP_HF_CALL_STATUS_CALL_IN_PROGRESS) {
+                send_outgoing_message(BT_EV_CALL_IN_PROGRESS, NULL, 0);
+            }
             ESP_LOGI(BT_TAG, "--Call indicator %s",
                     c_call_str[param->call.status]);
             break;
@@ -413,6 +442,11 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
 
         case ESP_HF_CLIENT_CIND_CALL_SETUP_EVT:
         {
+            if (param->call_setup.status == ESP_HF_CALL_SETUP_STATUS_INCOMING) {
+                send_outgoing_message(BT_EV_INCOMING_CALL, NULL, 0);
+            } else if (param->call_setup.status == ESP_HF_CALL_SETUP_STATUS_IDLE) {
+                send_outgoing_message(BT_EV_CALL_STATUS_IDLE, NULL, 0);
+            }
             ESP_LOGI(BT_TAG, "--Call setup indicator %s",
                     c_call_setup_str[param->call_setup.status]);
             break;
@@ -542,6 +576,22 @@ static void bt_msg_handler(void *arg) {
                 bt_init_stack();
                 break;
             }
+            case BT_EV_ANSWER_CALL: {
+                esp_hf_client_answer_call();
+                break;
+            }
+            case BT_EV_CALL_HANGUP: {
+                esp_hf_client_reject_call();
+                break;
+            }
+            case BT_EV_DIAL_NUMBER: {
+                const char *number = (char *) msg.data;
+                esp_hf_client_dial(number);
+            }
+                                   
+            default: {
+                break;
+            }
         }
         
         if (msg.data) {
@@ -552,27 +602,12 @@ static void bt_msg_handler(void *arg) {
     }
 }
 
-void bt_task_send_msg(bt_msg_t *msg) {
-    xQueueSend(bt_msg_queue, msg, BT_QUEUE_ADD_MAX_WAIT_TICKS / portTICK_PERIOD_MS);
+void bt_task_send(bt_event_type_t ev, void *data, size_t data_size) {
+    bt_msg_t msg = bt_create_msg(ev, data, data_size);
+    xQueueSend(bt_msg_queue, &msg, BT_QUEUE_ADD_MAX_WAIT_TICKS / portTICK_PERIOD_MS);
 }
 
-void bt_task_send(bt_event_type_t ev, void *data, uint32_t data_size) {
-    bt_msg_t msg = {
-        .ev = ev,
-        .data_size = data_size
-    };
-    memset(&msg, 0, sizeof(bt_msg_t));
-    
-    if (!data_size) {
-        return bt_task_send_msg(&msg);
-    }
-    
-    msg.data = malloc(data_size);
-    assert(msg.data != NULL);
-    memcpy(msg.data, data, data_size);
-}
-
-void bt_init() {
+void bt_init(QueueHandle_t outgoing_msg_queue) {
     // uint8_t local_buf[80];
     // utils_generate_sine_wave(400, (uint16_t *)local_buf, 16000);
     
@@ -603,6 +638,7 @@ void bt_init() {
 
     // printf("\n");
    
+    bt_outgoing_msg_queue = outgoing_msg_queue;
     bt_msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
     assert(bt_msg_queue != NULL);
 

@@ -5,6 +5,7 @@
 #include "driver/spi_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "driver/gpio.h"
 #include "driver/dac_continuous.h"
 #include "esp_bt.h"
@@ -25,9 +26,22 @@
 #define RINGER_SIGNAL_PIN 5
 #define RINGER_ENABLE_PIN 18
 
+static uint8_t incoming_call_alert = 0;
+static uint8_t call_in_progress = 0;
+
 void on_headset_state_change(uint8_t state) {
     ESP_LOGI(TAG, "Headset state change: %d", state);
-    ringer_enable(!state);
+    
+    if (state && incoming_call_alert) {
+        bt_task_send(BT_EV_ANSWER_CALL, NULL, 0);
+        ringer_enable(0);
+        return;
+    }
+    
+    if (!state && call_in_progress) {
+        bt_task_send(BT_EV_CALL_HANGUP, NULL, 0);
+        return;
+    }
 }
 
 void on_start_dialing() {
@@ -43,7 +57,11 @@ void on_end_dialing(const char *number, uint8_t number_length) {
     if (!number_length) {
         return;
     }
-    ESP_LOGI(TAG, "Dialed number: %s. Number length: %d", number, number_length);
+    
+    if (dialer_get_headset_state()) {
+        bt_task_send(BT_EV_DIAL_NUMBER, number, (size_t) number_length);
+        ESP_LOGI(TAG, "Dialing number: %s. Number length: %d", number, number_length);
+    }
 }
 
 #define PI 3.14159265
@@ -218,9 +236,59 @@ void app_main(void) {
         ESP_LOGE(TAG, "%s enable bluedroid failed: %s\n", __func__, esp_err_to_name(ret));
         return;
     }
-    bt_init();
     
+    QueueHandle_t bt_msg_queue = xQueueCreate(10, sizeof(bt_msg_t));
+    assert(bt_msg_queue != NULL);
+
+    bt_init(bt_msg_queue);
+    
+    bt_msg_t msg;
+
     while(1) {
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        if (xQueueReceive(bt_msg_queue, &msg, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+
+        switch (msg.ev) {
+            case BT_EV_INCOMING_CALL: {
+                if (!dialer_get_headset_state()) {
+                    incoming_call_alert = 1;
+                    if (!ringer_get_state()) {
+                        ringer_enable(1);
+                    }
+                } else {
+                    bt_task_send(BT_EV_CALL_HANGUP, NULL, 0);
+                }
+                ESP_LOGI(TAG, "Incoming call");
+                break;
+            }
+
+            case BT_EV_CALL_STATUS_IDLE: {
+                if (ringer_get_state()) {
+                    ringer_enable(0);
+                }
+                ESP_LOGI(TAG, "Call canceled");
+                incoming_call_alert = 0;
+                break;
+            }
+
+            case BT_EV_CALL_IN_PROGRESS: {
+                incoming_call_alert = 0;
+                call_in_progress = 1;
+                ESP_LOGI(TAG, "Call in progress");
+                break;
+            }
+
+            case BT_EV_CALL_HANGUP: {
+                call_in_progress = 0;
+                ESP_LOGI(TAG, "Call hangup");
+                break;
+            }
+                                   
+            default: {
+                ESP_LOGW(TAG, "Unhandled message %d", msg.ev);
+                break;
+            }
+        }
     }
 }

@@ -14,6 +14,7 @@ static gpio_num_t enable_pin;
 static gpio_num_t signal_pin;
 
 static uint8_t last_ringing_state = 0;
+static uint8_t ringer_enabled;
 
 static esp_timer_handle_t ringing_timer;
 
@@ -76,6 +77,7 @@ void ringer_init(gpio_num_t en_pin, gpio_num_t sig_pin)
 
 void ringer_enable(uint8_t status) {
     uint8_t duty_cycle_percentage = (status) ? 50 : 0;
+    ringer_enabled = status;
     
     set_duty_cycle(duty_cycle_percentage);
     
@@ -91,4 +93,8 @@ void ringer_enable(uint8_t status) {
     }
     
     esp_timer_stop(ringing_timer);
+}
+
+uint8_t ringer_get_state() {
+    return ringer_enabled;
 }
