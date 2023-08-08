@@ -13,16 +13,12 @@
 #define DA_TAG "DA"
 #define DAC_DESCRIPTORS_NUM 8
 
-static int64_t last_incoming_buffer_us = 0;
-
-
 static dac_continuous_handle_t dac_handle;
 static dac_continuous_config_t dac_config;
 static TaskHandle_t audio_consumer_task;
 
 static QueueHandle_t dac_events_queue = NULL;
 static QueueHandle_t buffers_to_free_queue = NULL;
-static int sent_buf_count = 0;
 
 static void free_buffers_task_handler(void *arg) {
     dac_audio_free_buf_msg_t msg;
@@ -43,7 +39,7 @@ static void consume_buffers_task_handler(void *arg) {
         dac_audio_buffer_t *audio_buf = dac_audio_take_ready_buffer_safe(pool, 0);
         if (audio_buf == NULL) {
             // ESP_LOGI(DA_TAG, "No audio buffer present");
-            vTaskDelay(1);
+            // vTaskDelay(1);
             continue;
         }
         
@@ -245,11 +241,11 @@ void dac_audio_reset_buffer_pool(dac_audio_buffer_pool_t *pool) {
     while (pool->ready_buffers_count) {
         assert(dac_audio_enqueue_free_buffer(pool, dac_audio_take_ready_buffer(pool)) == 1);
     }
-    ESP_LOGD(DA_TAG, "Buffer pool reset\n");
-    ESP_LOGD(DA_TAG, "Available buffers count %d", pool->available_buffers_count);
-    ESP_LOGD(DA_TAG, "Read buffers count %d", pool->ready_buffers_count);
-    ESP_LOGD(DA_TAG, "Remaining free buffer slots %d", dac_audio_remaining_free_buffer_slots(pool));
-    ESP_LOGD(DA_TAG, "Remaining ready buffer slots %d", dac_audio_remaining_ready_buffer_slots(pool));
+    ESP_LOGI(DA_TAG, "Buffer pool reset\n");
+    ESP_LOGI(DA_TAG, "Available buffers count %d", pool->available_buffers_count);
+    ESP_LOGI(DA_TAG, "Ready buffers count %d", pool->ready_buffers_count);
+    ESP_LOGI(DA_TAG, "Remaining free buffer slots %d", dac_audio_remaining_free_buffer_slots(pool));
+    ESP_LOGI(DA_TAG, "Remaining ready buffer slots %d", dac_audio_remaining_ready_buffer_slots(pool));
 }
 
 dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, size_t buffer_size) {
@@ -283,6 +279,11 @@ dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, size_t bu
         assert(dac_audio_enqueue_free_buffer(buffer_pool, buffer) == 1);
     }
     ESP_LOGI(DA_TAG, "Initialized DAC audio buffer pool of %d buffers using %d max sample count", pool_size, buffer_size);
+    ESP_LOGI(DA_TAG, "Buffer pool reset\n");
+    ESP_LOGI(DA_TAG, "Available buffers count %d", buffer_pool->available_buffers_count);
+    ESP_LOGI(DA_TAG, "Ready buffers count %d", buffer_pool->ready_buffers_count);
+    ESP_LOGI(DA_TAG, "Remaining free buffer slots %d", dac_audio_remaining_free_buffer_slots(buffer_pool));
+    ESP_LOGI(DA_TAG, "Remaining ready buffer slots %d", dac_audio_remaining_ready_buffer_slots(buffer_pool));
     
     return buffer_pool;
 }
@@ -348,7 +349,7 @@ void dac_audio_enable(uint8_t status) {
         ESP_ERROR_CHECK(dac_continuous_start_async_writing(dac_handle));
         return;
     }
-    vTaskResume(audio_consumer_task);
+    vTaskSuspend(audio_consumer_task);
     ESP_ERROR_CHECK(dac_continuous_stop_async_writing(dac_handle));
     ESP_ERROR_CHECK(dac_continuous_disable(dac_handle));
 }

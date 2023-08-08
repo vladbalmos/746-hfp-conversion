@@ -234,7 +234,7 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
     last_incoming_buffer_us = now;
     
     if (rcv_buf_count++ % 100 == 0) {
-        ESP_LOGI(BT_TAG, "Buffer interval %"PRId64". Sample count: %ld", interval, size / 2);
+        // ESP_LOGI(BT_TAG, "Buffer interval %"PRId64". Sample count: %ld", interval, size / 2);
     }
     
     if (!buffer_out_remaining) {
@@ -276,9 +276,11 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
     }
 
     // We've filled our buffer, enque it for the dac conversion
-    if (!dac_audio_enqueue_ready_buffer_safe(audio_out_buf_pool, buffer_out, 0)) {
+    if (dac_audio_enqueue_ready_buffer_safe(audio_out_buf_pool, buffer_out, 0)) {
+        buffer_out = NULL;
+    } else {
         dac_audio_schedule_used_buf_release(audio_out_buf_pool, buffer_out, 0);
-        // ESP_LOGI(BT_TAG, "Unable to enqueue ready buffer");
+        ESP_LOGW(BT_TAG, "Unable to enqueue ready buffer");
     }
     
     // We still have more data that needs to be enqueued
@@ -294,6 +296,9 @@ static void bt_hf_client_audio_open() {
 
 static void bt_hf_client_audio_close() {
     dac_audio_enable(0);
+    if (buffer_out != NULL) {
+        dac_audio_enqueue_free_buffer_safe(audio_out_buf_pool, buffer_out, portMAX_DELAY);
+    }
     dac_audio_reset_buffer_pool(audio_out_buf_pool);
     buffer_out = NULL;
     buffer_out_remaining = 0;
