@@ -18,18 +18,16 @@
 #include "bt.h"
 
 
-#define BT_PCM_BLOCK_DURATION_US 7500
-#define BT_WBS_PCM_SAMPLING_RATE_KHZ  16
-#define BT_BYTES_PER_SAMPLE  2
-#define BT_WBS_PCM_INPUT_DATA_SIZE (BT_WBS_PCM_SAMPLING_RATE_KHZ * BT_PCM_BLOCK_DURATION_US / 1000 * BT_BYTES_PER_SAMPLE) //240
-
 #define BT_TAG "BT"
 #define BT_QUEUE_ADD_MAX_WAIT_TICKS 10
 #define BT_QUEUE_MAX_SIZE 16
 #define BT_DEVICE_NAME "GPO 746"
-#define BT_HFP_RINGBUF_SIZE 3600
-#define BT_AUDIO_BUF_POOL_SIZE 3
-#define BT_AUDIO_BUF_SIZE 3 * BT_WBS_PCM_INPUT_DATA_SIZE // buffer 22ms
+
+static QueueHandle_t bt_msg_queue = NULL;
+static QueueHandle_t bt_outgoing_msg_queue = NULL;
+
+static int rcv_buf_count = 0;
+static int64_t last_incoming_buffer_us = 0;
 
 const static char *c_hf_evt_str[] = {
     "CONNECTION_STATE_EVT",              /*!< connection state changed event */
@@ -172,34 +170,6 @@ const char *c_inband_ring_state_str[] = {
     "Provided",
 };
 
-// static TaskHandle_t bt_audio_out_task = NULL;
-static QueueHandle_t bt_msg_queue = NULL;
-static QueueHandle_t bt_outgoing_msg_queue = NULL;
-static dac_audio_buffer_pool_t *audio_out_buf_pool = NULL;
-static dac_audio_buffer_pool_t *audio_in_buf_pool = NULL;
-static dac_audio_buffer_t *buffer_out = NULL;
-static size_t buffer_out_remaining = 0;
-
-static int rcv_buf_count = 0;
-static int64_t last_incoming_buffer_us = 0;
-static uint8_t buf[240];
-
-#define PI 3.14159265
-static uint16_t utils_generate_sine_wave(uint16_t frequency, uint16_t *buffer, uint16_t sample_rate) {
-    const uint16_t samples = sample_rate / frequency;
-    
-    for (uint16_t i = 0; i < samples; i++) {
-        double angle = (double)i / (double)samples * 2.0 * PI;
-        double sine_val = sin(angle);
-        int val = round((sine_val + 1.0) / 2.0 * 65535);
-        if (val < 0) {
-            val = 0;
-        }
-        buffer[i] = (uint16_t) val;
-    }
-    return samples;
-}
-
 bt_msg_t bt_create_msg(bt_event_type_t ev, void *data, size_t data_size) {
     bt_msg_t msg;
 
@@ -234,60 +204,10 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
     last_incoming_buffer_us = now;
     
     if (rcv_buf_count++ % 100 == 0) {
-        // ESP_LOGI(BT_TAG, "Buffer interval %"PRId64". Sample count: %ld", interval, size / 2);
+        ESP_LOGI(BT_TAG, "Buffer interval %"PRId64". Sample count: %ld", interval, size / 2);
     }
     
-    if (!buffer_out_remaining) {
-        dac_audio_buffer_t *audio_buf = dac_audio_take_free_buffer_safe(audio_out_buf_pool, portMAX_DELAY);
-        if (audio_buf == NULL) {
-            // @TODO: add warning statistics
-            ESP_LOGE(BT_TAG, "No free buffer available");
-            return;
-        }
-        
-        buffer_out = audio_buf;
-        buffer_out_remaining  = audio_buf->size;
-    }
-    
-    size_t samples_to_write = size / 2;
-    size_t bytes_written = 0;
-    
-    int16_t *src = (int16_t *) buf;
-    uint8_t *dst = buffer_out->bytes + (buffer_out->size - buffer_out_remaining);
-
-    for (size_t i = 0; i < samples_to_write; i++) {
-        float dither = ((float)rand() / (float)RAND_MAX) - 0.5f;
-
-        float val = ((src[i] - INT16_MIN) >> 8) + dither;
-        if (val < 0) {
-            val = 0.0;
-        } else if (val > 255) {
-            val = 255.0;
-        }
-        *dst = (uint8_t) val;
-        dst++;
-        bytes_written++;
-    }
-    buffer_out_remaining -= bytes_written;
-    
-    if (buffer_out_remaining) {
-        // We still need some more data before enqueing
-        return;
-    }
-
-    // We've filled our buffer, enque it for the dac conversion
-    if (dac_audio_enqueue_ready_buffer_safe(audio_out_buf_pool, buffer_out, 0)) {
-        buffer_out = NULL;
-    } else {
-        dac_audio_schedule_used_buf_release(audio_out_buf_pool, buffer_out, 0);
-        ESP_LOGW(BT_TAG, "Unable to enqueue ready buffer");
-    }
-    
-    // We still have more data that needs to be enqueued
-    if (bytes_written < samples_to_write) {
-        // start a new buffer from where we've left off
-        bt_hf_incoming_data_callback(buf + bytes_written, size - bytes_written);
-    }
+    dac_audio_send(buf, size);
 }
 
 static void bt_hf_client_audio_open() {
@@ -296,12 +216,6 @@ static void bt_hf_client_audio_open() {
 
 static void bt_hf_client_audio_close() {
     dac_audio_enable(0);
-    if (buffer_out != NULL) {
-        dac_audio_enqueue_free_buffer_safe(audio_out_buf_pool, buffer_out, portMAX_DELAY);
-    }
-    dac_audio_reset_buffer_pool(audio_out_buf_pool);
-    buffer_out = NULL;
-    buffer_out_remaining = 0;
 }
 
 static void esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
@@ -543,13 +457,7 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
 
 static void bt_init_stack() {
     // Init audio part
-    audio_out_buf_pool = dac_audio_init_buffer_pool(BT_AUDIO_BUF_POOL_SIZE, BT_AUDIO_BUF_SIZE / 2);
-    assert(audio_out_buf_pool != NULL);
-
-    audio_in_buf_pool = dac_audio_init_buffer_pool(BT_AUDIO_BUF_POOL_SIZE, BT_AUDIO_BUF_SIZE / 2);
-    assert(audio_in_buf_pool != NULL);
-
-    dac_audio_init(DAC_SAMPLE_RATE_16KHZ, audio_out_buf_pool, BT_AUDIO_BUF_SIZE);
+    dac_audio_init(DAC_SAMPLE_RATE_16KHZ);
 
     // Init HFP stack
     ESP_ERROR_CHECK(esp_bt_dev_set_device_name(BT_DEVICE_NAME));
@@ -613,36 +521,6 @@ void bt_task_send(bt_event_type_t ev, void *data, size_t data_size) {
 }
 
 void bt_init(QueueHandle_t outgoing_msg_queue) {
-    // uint8_t local_buf[80];
-    // utils_generate_sine_wave(400, (uint16_t *)local_buf, 16000);
-    
-    // uint16_t *src = (uint16_t *) local_buf;
-    // for (int i = 0; i < 3; i++) {
-    //     for (int j = 0; j < 40; j++) {
-    //         int index = (40 * i) + j;
-    //         printf("% 5d ", src[j]);
-            
-    //         if (j && (j % 15 == 0)) {
-    //             printf("\n");
-    //         }
-    //         buf[index] = src[j] >> 8;
-    //     }
-    // }
-
-    // printf("\n");
-    
-    // memcpy(&buf[120], buf, 120);
-    
-    // for (int i = 0; i < 240; i++) {
-    //     printf("% 5d ", buf[i]);
-        
-    //     if (i && (i % 15 == 0)) {
-    //         printf("\n");
-    //     }
-    // }
-
-    // printf("\n");
-   
     bt_outgoing_msg_queue = outgoing_msg_queue;
     bt_msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
     assert(bt_msg_queue != NULL);

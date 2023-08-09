@@ -1,5 +1,6 @@
 #include <inttypes.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/ringbuf.h"
 #include "freertos/semphr.h"
 
 typedef struct dac_audio_buffer {
@@ -35,9 +36,9 @@ typedef enum {
 } dac_audio_sample_rate_t;
 
 
-void dac_audio_init(dac_audio_sample_rate_t sample_rate, dac_audio_buffer_pool_t *buffer_pool, size_t buffer_size);
+void dac_audio_init(dac_audio_sample_rate_t sample_rate);
 void dac_audio_enable(uint8_t status);
-void dac_audio_send(uint8_t *buf, size_t size);
+void dac_audio_send(const uint8_t *buf, size_t size);
 
 dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, size_t buffer_size);
 void dac_audio_reset_buffer_pool(dac_audio_buffer_pool_t *pool);
@@ -47,8 +48,6 @@ dac_audio_buffer_t *dac_audio_take_free_buffer(dac_audio_buffer_pool_t *pool);
 dac_audio_buffer_t *dac_audio_take_free_buffer_safe(dac_audio_buffer_pool_t *pool, TickType_t wait);
 dac_audio_buffer_t *dac_audio_take_ready_buffer(dac_audio_buffer_pool_t *pool);
 dac_audio_buffer_t *dac_audio_take_ready_buffer_safe(dac_audio_buffer_pool_t *pool, TickType_t wait);
-
-void dac_audio_schedule_used_buf_release(dac_audio_buffer_pool_t *return_pool, dac_audio_buffer_t *buf, uint8_t fromISR);
 
 uint8_t dac_audio_remaining_free_buffer_slots(dac_audio_buffer_pool_t *pool);
 uint8_t dac_audio_remaining_ready_buffer_slots(dac_audio_buffer_pool_t *pool);

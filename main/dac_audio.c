@@ -4,6 +4,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/ringbuf.h"
 #include "driver/dac_continuous.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -13,75 +14,67 @@
 #define DA_TAG "DA"
 #define DAC_DESCRIPTORS_NUM 8
 
+#define DAC_PCM_BLOCK_DURATION_US 7500
+#define DAC_WBS_PCM_SAMPLING_RATE_KHZ  16
+#define DAC_BYTES_PER_SAMPLE  2
+#define DAC_WBS_PCM_INPUT_DATA_SIZE (DAC_WBS_PCM_SAMPLING_RATE_KHZ * DAC_PCM_BLOCK_DURATION_US / 1000 * DAC_BYTES_PER_SAMPLE) // 240
+#define DAC_AUDIO_BUFFER_SIZE DAC_WBS_PCM_INPUT_DATA_SIZE
+#define DAC_AUDIO_RING_BUF_SIZE 7 * DAC_WBS_PCM_INPUT_DATA_SIZE // buffer 50ms
+#define DAC_AUDIO_TMP_BUF_SIZE 2 * DAC_WBS_PCM_INPUT_DATA_SIZE
+
+static uint8_t audio_out_buf[DAC_AUDIO_BUFFER_SIZE]; // buffer sent to DAC for output
+static uint8_t tmp_audio_buf[DAC_AUDIO_TMP_BUF_SIZE]; // buffer holding 8 bit down converted mSBC frames
+static TaskHandle_t audio_consumer_task;
 static dac_continuous_handle_t dac_handle;
 static dac_continuous_config_t dac_config;
-static TaskHandle_t audio_consumer_task;
-
-static QueueHandle_t dac_events_queue = NULL;
-static QueueHandle_t buffers_to_free_queue = NULL;
-
-static void free_buffers_task_handler(void *arg) {
-    dac_audio_free_buf_msg_t msg;
-    
-    while (1) {
-        if (!xQueueReceive(buffers_to_free_queue, &msg, portMAX_DELAY)) {
-            continue;
-        }
-        
-        dac_audio_enqueue_free_buffer_safe(msg.pool, msg.buf, portMAX_DELAY);
-        // ESP_LOGW(DA_TAG, "Releasing buffer");
-    }
-}
+static RingbufHandle_t audio_out_rb = NULL;
 
 static void consume_buffers_task_handler(void *arg) {
-    dac_audio_buffer_pool_t *pool = (dac_audio_buffer_pool_t *) arg;
+    RingbufHandle_t rb = audio_out_rb;
+    uint8_t *audio_data = NULL;
+    size_t buffered_samples;
+    // size_t samples_to_stream = DAC_WBS_PCM_INPUT_DATA_SIZE / 2;
+    size_t samples_to_stream = 240;
+    size_t min_buffered_samples = 2 * samples_to_stream;
+    size_t received_samples = 0;
+
     while (1) {
-        dac_audio_buffer_t *audio_buf = dac_audio_take_ready_buffer_safe(pool, 0);
-        if (audio_buf == NULL) {
-            // ESP_LOGI(DA_TAG, "No audio buffer present");
-            // vTaskDelay(1);
+        if (audio_out_rb == NULL) {
+            vTaskDelay(1);
             continue;
         }
-        
-        dac_event_data_t evt_data;
-        size_t bytes_written = 0;
 
+        buffered_samples = DAC_AUDIO_RING_BUF_SIZE - xRingbufferGetCurFreeSize(rb);
         
-        while (bytes_written < audio_buf->size) {
-            if (xQueueReceive(dac_events_queue, &evt_data, 0) != pdTRUE) {
-                break;
-            }
-            size_t loaded_bytes = 0;
-            ESP_ERROR_CHECK(
-                dac_continuous_write_asynchronously(dac_handle, evt_data.buf, evt_data.buf_size,
-                                                    audio_buf->bytes + bytes_written, audio_buf->size - bytes_written,
-                                                    &loaded_bytes)
-            );
-            bytes_written += loaded_bytes;
+        if (buffered_samples < min_buffered_samples) {
+            // ESP_LOGW(DA_TAG, "Not enough buffered samples");
+            goto stream_silence;
         }
 
-        // ESP_LOGI(DA_TAG, "Wrote data");
-        dac_audio_schedule_used_buf_release(pool, audio_buf, 0);
+        audio_data = xRingbufferReceiveUpTo(rb, &received_samples, 0, DAC_AUDIO_BUFFER_SIZE);
+        if (!received_samples) {
+            // ESP_LOGW(DA_TAG, "No samples buffered");
+            goto stream_silence;
+        }
+
+        memcpy(audio_out_buf, audio_data, received_samples);
+        vRingbufferReturnItem(rb, audio_data);
+        if (received_samples < DAC_AUDIO_BUFFER_SIZE) {
+            // If we got less than what we asked for, fill the buffer with silence
+            memset(audio_out_buf + received_samples, 0, DAC_AUDIO_BUFFER_SIZE - received_samples);
+        }
+        received_samples = 0;
+        dac_continuous_write(dac_handle, audio_out_buf, DAC_AUDIO_BUFFER_SIZE, NULL, -1); // must finish in at most 16ms
+        continue;
+        
+stream_silence:
+        memset(audio_out_buf, 0, DAC_AUDIO_BUFFER_SIZE / 2);
+        dac_continuous_write(dac_handle, audio_out_buf, DAC_AUDIO_BUFFER_SIZE / 2, NULL, -1); // must finish in at most 8ms
+        continue;
     }
-}
-
-static bool IRAM_ATTR dac_on_conversion_done_callback(dac_continuous_handle_t handle, const dac_event_data_t *event, void *user_data) {
-    QueueHandle_t que = (QueueHandle_t)user_data;
-    BaseType_t need_awoke;
-
-    /* When the queue is full, drop the oldest item */
-    if (xQueueIsQueueFullFromISR(que)) {
-        dac_event_data_t dummy;
-        xQueueReceiveFromISR(que, &dummy, &need_awoke);
-    }
-
-    /* Send the event from callback */
-    xQueueSendFromISR(que, event, &need_awoke);
-    return need_awoke;
 }
 
 static dac_audio_buffer_t *init_audio_buffer(size_t buffer_size) {
-    // uint8_t *bytes = heap_caps_malloc(buffer_size, MALLOC_CAP_DMA);
     uint8_t *bytes = malloc(buffer_size);
     dac_audio_buffer_t *audio_buffer = malloc(sizeof(dac_audio_buffer_t));
     
@@ -288,68 +281,65 @@ dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, size_t bu
     return buffer_pool;
 }
 
-void dac_audio_schedule_used_buf_release(dac_audio_buffer_pool_t *return_pool, dac_audio_buffer_t *buf, uint8_t fromISR) {
-    dac_audio_free_buf_msg_t msg = {
-        .pool = return_pool,
-        .buf = buf
-    };
+void dac_audio_send(const uint8_t *buf, size_t size) {
+    size_t samples_to_write = size / 2;
+    size_t bytes_written = 0;
     
-    if (fromISR) {
-        if ((xQueueSendFromISR(buffers_to_free_queue, &msg, NULL) != pdTRUE)) {
-            ESP_DRAM_LOGE(DA_TAG, "Unable to schedule buffer release (ISR)");
-        }
-    } else {
-        if ((xQueueSend(buffers_to_free_queue, &msg, 10 / portTICK_PERIOD_MS)) != pdTRUE) {
-            ESP_LOGE(DA_TAG, "Unable to schedule buffer release (non-ISR)");
-        }
+    if (samples_to_write > DAC_AUDIO_TMP_BUF_SIZE) {
+        samples_to_write = DAC_AUDIO_TMP_BUF_SIZE;
+        ESP_LOGW(DA_TAG, "Audio buffer to small. Max value is %d, received: %d", DAC_AUDIO_TMP_BUF_SIZE, samples_to_write);
     }
-}
-
-void dac_audio_send(uint8_t *buf, size_t size) {
-    dac_continuous_write(dac_handle, buf, size, NULL, -1);
-}
-
-void dac_audio_init(dac_audio_sample_rate_t sample_rate, dac_audio_buffer_pool_t *buffer_pool, size_t buffer_size) {
-    // Create task to free used buffers
-    buffers_to_free_queue = xQueueCreate(8, sizeof(dac_audio_free_buf_msg_t));
-    assert(buffers_to_free_queue != NULL);
     
-    BaseType_t r = xTaskCreate(free_buffers_task_handler, "free_buf", 2048, NULL, 10, NULL);
-    assert(r == pdPASS);
+    int16_t *src = (int16_t *) buf;
+    uint8_t *dst = tmp_audio_buf;
 
-    // Create task & queue to consume audio buffers
-    dac_events_queue = xQueueCreate(8, sizeof(dac_event_data_t));
-    assert(dac_events_queue != NULL);
+    for (size_t i = 0; i < samples_to_write; i++) {
+        float dither = ((float)rand() / (float)RAND_MAX) - 0.5f;
 
-    r = xTaskCreatePinnedToCore(consume_buffers_task_handler, "consume_buf", 4096, buffer_pool, 15, &audio_consumer_task, 1);
+        float val = ((src[i] - INT16_MIN) >> 8) + dither;
+        if (val < 0) {
+            val = 0.0;
+        } else if (val > 255) {
+            val = 255.0;
+        }
+        *dst = (uint8_t) val;
+        dst++;
+        bytes_written++;
+    }
+    
+    BaseType_t r = xRingbufferSend(audio_out_rb, tmp_audio_buf, bytes_written, 0);
+    if (r != pdTRUE) {
+        ESP_LOGW(DA_TAG, "Failed to write audio data to ring buffer");
+    }
+    memset(tmp_audio_buf, 0, DAC_AUDIO_TMP_BUF_SIZE);
+}
+
+void dac_audio_enable(uint8_t status) {
+    memset(tmp_audio_buf, 0, DAC_AUDIO_TMP_BUF_SIZE);
+    if (status) {
+        audio_out_rb = xRingbufferCreate(DAC_AUDIO_RING_BUF_SIZE, RINGBUF_TYPE_BYTEBUF);
+        assert(audio_out_rb != NULL);
+
+        ESP_ERROR_CHECK(dac_continuous_enable(dac_handle));
+        vTaskResume(audio_consumer_task);
+        return;
+    }
+    vTaskSuspend(audio_consumer_task);
+    ESP_ERROR_CHECK(dac_continuous_disable(dac_handle));
+    vRingbufferDelete(audio_out_rb);
+    audio_out_rb = NULL;
+}
+
+void dac_audio_init(dac_audio_sample_rate_t sample_rate) {
+    BaseType_t r = xTaskCreatePinnedToCore(consume_buffers_task_handler, "consume_buf", 4096, NULL, 15, &audio_consumer_task, 1);
     assert(r == pdPASS);
     vTaskSuspend(audio_consumer_task);
     
     // Init dac
     dac_config.chan_mask = DAC_CHANNEL_MASK_CH0;
     dac_config.desc_num = DAC_DESCRIPTORS_NUM;
-    dac_config.buf_size = buffer_size;
-    // dac_config.buf_size = 240;
+    dac_config.buf_size = DAC_AUDIO_BUFFER_SIZE;
     dac_config.freq_hz = (sample_rate == DAC_SAMPLE_RATE_16KHZ) ? 16000 : 44100;
     dac_config.clk_src = DAC_DIGI_CLK_SRC_APLL;
     ESP_ERROR_CHECK(dac_continuous_new_channels(&dac_config, &dac_handle));
-    
-    dac_event_callbacks_t dac_callbacks = {
-        .on_convert_done = dac_on_conversion_done_callback,
-        .on_stop = NULL,
-    };
-
-    ESP_ERROR_CHECK(dac_continuous_register_event_callback(dac_handle, &dac_callbacks, dac_events_queue));
-}
-
-void dac_audio_enable(uint8_t status) {
-    if (status) {
-        vTaskResume(audio_consumer_task);
-        ESP_ERROR_CHECK(dac_continuous_enable(dac_handle));
-        ESP_ERROR_CHECK(dac_continuous_start_async_writing(dac_handle));
-        return;
-    }
-    vTaskSuspend(audio_consumer_task);
-    ESP_ERROR_CHECK(dac_continuous_stop_async_writing(dac_handle));
-    ESP_ERROR_CHECK(dac_continuous_disable(dac_handle));
 }
