@@ -31,18 +31,20 @@ typedef struct dac_audio_free_buf_msg {
 } dac_audio_free_buf_msg_t;
 
 typedef enum {
+    DAC_SAMPLE_RATE_NONE,
+    DAC_SAMPLE_RATE_8KHZ,
     DAC_SAMPLE_RATE_16KHZ,
-    DAC_SAMPLE_RATE_44KHZ,
 } dac_audio_sample_rate_t;
 
 
 void dac_audio_init(dac_audio_sample_rate_t sample_rate);
+void dac_audio_deinit();
 void dac_audio_enable(uint8_t status);
 void dac_audio_send(const uint8_t *buf, size_t size);
+dac_audio_sample_rate_t dac_audio_get_sample_rate();
 
 dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, size_t buffer_size);
 void dac_audio_reset_buffer_pool(dac_audio_buffer_pool_t *pool);
-
 
 dac_audio_buffer_t *dac_audio_take_free_buffer(dac_audio_buffer_pool_t *pool);
 dac_audio_buffer_t *dac_audio_take_free_buffer_safe(dac_audio_buffer_pool_t *pool, TickType_t wait);

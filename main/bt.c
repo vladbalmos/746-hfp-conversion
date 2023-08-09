@@ -204,13 +204,22 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
     last_incoming_buffer_us = now;
     
     if (rcv_buf_count++ % 100 == 0) {
-        ESP_LOGI(BT_TAG, "Buffer interval %"PRId64". Sample count: %ld", interval, size / 2);
+        ESP_LOGI(BT_TAG, "Buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
     }
     
     dac_audio_send(buf, size);
 }
 
-static void bt_hf_client_audio_open() {
+static void bt_hf_client_audio_open(esp_hf_client_audio_state_t con_state) {
+    dac_audio_sample_rate_t dac_current_sample_rate = dac_audio_get_sample_rate();
+    dac_audio_sample_rate_t dac_new_sample_rate = (con_state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) 
+                                                   ? DAC_SAMPLE_RATE_16KHZ : DAC_SAMPLE_RATE_8KHZ;
+                                                   
+    if (dac_current_sample_rate != dac_new_sample_rate) {
+        dac_audio_deinit();
+        dac_audio_init(dac_new_sample_rate);
+    }
+    
     dac_audio_enable(1);
 }
 
@@ -285,6 +294,14 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
                     c_connection_state_str[param->conn_stat.state],
                     param->conn_stat.peer_feat,
                     param->conn_stat.chld_feat);
+            
+            if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED) {
+                ESP_LOGI(BT_TAG, "Initializing dac");
+                dac_audio_init(DAC_SAMPLE_RATE_16KHZ);
+            } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
+                ESP_LOGI(BT_TAG, "DE_Initializing dac");
+                dac_audio_deinit();
+            }
             break;
         }
                                                  
@@ -295,9 +312,12 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
             if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED ||
                 param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC)
             {
-                esp_hf_client_register_data_callback(bt_hf_incoming_data_callback,
-                                                    bt_hf_outgoing_data_callback);
-                bt_hf_client_audio_open();
+                if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) {
+                    ESP_LOGW(BT_TAG, "msbc connection");
+                } else {
+                    ESP_LOGE(BT_TAG, "cvsd connection");
+                }
+                bt_hf_client_audio_open(param->audio_stat.state);
             } else {
                 bt_hf_client_audio_close();
             }
@@ -456,14 +476,12 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
 }
 
 static void bt_init_stack() {
-    // Init audio part
-    dac_audio_init(DAC_SAMPLE_RATE_16KHZ);
-
     // Init HFP stack
     ESP_ERROR_CHECK(esp_bt_dev_set_device_name(BT_DEVICE_NAME));
     ESP_ERROR_CHECK(esp_bt_gap_register_callback(esp_bt_gap_callback));
     ESP_ERROR_CHECK(esp_hf_client_register_callback(esp_bt_hf_client_callback));
     ESP_ERROR_CHECK(esp_hf_client_init());
+    ESP_ERROR_CHECK(esp_hf_client_register_data_callback(bt_hf_incoming_data_callback, bt_hf_outgoing_data_callback));
     
     esp_bt_pin_type_t pin_type = ESP_BT_PIN_TYPE_FIXED;
     esp_bt_pin_code_t pin_code;
