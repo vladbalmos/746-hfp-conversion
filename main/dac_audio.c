@@ -48,8 +48,9 @@ static inline size_t dac_audio_get_rb_size() {
 }
 
 static void consume_buffers_task_handler(void *arg) {
-    RingbufHandle_t rb = audio_out_rb;
+    RingbufHandle_t audio_out_rb = (RingbufHandle_t) arg;
     uint8_t *audio_data = NULL;
+
     size_t buffered_samples_size;
     size_t dac_buf_size = dac_audio_get_buffer_size();
     size_t min_buffered_samples_size = dac_buf_size;
@@ -57,26 +58,26 @@ static void consume_buffers_task_handler(void *arg) {
 
     ESP_LOGW(DA_TAG, "DAC audio buffer size is: %d", dac_buf_size);
     while (1) {
-        if (rb == NULL || !enabled) {
+        if (audio_out_rb == NULL || !enabled) {
             vTaskDelay(1);
             continue;
         }
 
-        buffered_samples_size = dac_audio_get_rb_size() - xRingbufferGetCurFreeSize(rb);
+        buffered_samples_size = dac_audio_get_rb_size() - xRingbufferGetCurFreeSize(audio_out_rb);
         
         if (buffered_samples_size < min_buffered_samples_size) {
-            ESP_LOGW(DA_TAG, "Not enough samples. Streaming silence. Expected: %d. Received %d", min_buffered_samples_size, buffered_samples_size);
+            // ESP_LOGW(DA_TAG, "Not enough samples. Streaming silence. Expected: %d. Received %d", min_buffered_samples_size, buffered_samples_size);
             goto stream_silence;
         }
 
-        audio_data = xRingbufferReceiveUpTo(rb, &received_bytes, 0, dac_buf_size);
+        audio_data = xRingbufferReceiveUpTo(audio_out_rb, &received_bytes, 0, dac_buf_size);
         if (!received_bytes) {
-            ESP_LOGW(DA_TAG, "No bytes received from ring buffer. Streaming silence");
+            // ESP_LOGW(DA_TAG, "No bytes received from ring buffer. Streaming silence");
             goto stream_silence;
         }
 
         memcpy(audio_out_buf, audio_data, received_bytes);
-        vRingbufferReturnItem(rb, audio_data);
+        vRingbufferReturnItem(audio_out_rb, audio_data);
         if (received_bytes < dac_buf_size) {
             // If we got less than what we asked for, fill the buffer with silence
             memset(audio_out_buf + received_bytes, 0, dac_buf_size - received_bytes);
@@ -329,9 +330,9 @@ void dac_audio_send(const uint8_t *buf, size_t size) {
     }
     
     BaseType_t r = xRingbufferSend(audio_out_rb, tmp_audio_buf, bytes_written, 0);
-    // if (r != pdTRUE) {
-    //     ESP_LOGW(DA_TAG, "Failed to write audio data to ring buffer");
-    // }
+    if (r != pdTRUE) {
+        ESP_LOGW(DA_TAG, "Failed to write audio data to ring buffer");
+    }
     memset(tmp_audio_buf, 0, tmp_audio_buf_size);
 }
 
@@ -351,18 +352,22 @@ void dac_audio_enable(uint8_t status) {
         audio_out_rb = xRingbufferCreate(dac_audio_get_rb_size(), RINGBUF_TYPE_BYTEBUF);
         assert(audio_out_rb != NULL);
 
+        BaseType_t r = xTaskCreate(consume_buffers_task_handler, "consume_buf", 4096, audio_out_rb, 15, &audio_consumer_task);
+        assert(r == pdPASS);
+
         ESP_ERROR_CHECK(dac_continuous_enable(dac_handle));
-        vTaskResume(audio_consumer_task);
         enabled = 1;
         return;
     }
 
+    enabled = 0;
     ESP_LOGW(DA_TAG, "Disabling dac");
-    vTaskSuspend(audio_consumer_task);
     ESP_ERROR_CHECK(dac_continuous_disable(dac_handle));
+    ESP_LOGW(DA_TAG, "Deleting task");
+    vTaskDelete(audio_consumer_task);
+
     vRingbufferDelete(audio_out_rb);
     audio_out_rb = NULL;
-    enabled = 0;
 }
 
 dac_audio_sample_rate_t dac_audio_get_sample_rate() {
@@ -384,10 +389,6 @@ void dac_audio_init(dac_audio_sample_rate_t sample_rate) {
     tmp_audio_buf = malloc(tmp_audio_buf_size);
     assert(tmp_audio_buf != NULL);
     
-    BaseType_t r = xTaskCreate(consume_buffers_task_handler, "consume_buf", 4096, NULL, 15, &audio_consumer_task);
-    assert(r == pdPASS);
-    vTaskSuspend(audio_consumer_task);
-    
     // Init dac
     dac_config.chan_mask = DAC_CHANNEL_MASK_CH0;
     dac_config.desc_num = DAC_DESCRIPTORS_NUM;
@@ -408,8 +409,6 @@ void dac_audio_deinit() {
     dac_audio_enable(0);
     ESP_LOGW(DA_TAG, "Releasing channels");
     ESP_ERROR_CHECK(dac_continuous_del_channels(dac_handle));
-    ESP_LOGW(DA_TAG, "Deleting task");
-    vTaskDelete(audio_consumer_task);
     dac_sample_rate = DAC_SAMPLE_RATE_NONE;
 
     ESP_LOGW(DA_TAG, "Freeing audio buf");

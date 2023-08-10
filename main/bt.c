@@ -274,6 +274,16 @@ static void esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param
             break;
         }
                                      
+        case ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT: {
+            ESP_LOGI(BT_TAG, "ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT Disconnected");
+            break;
+        }
+
+        case ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT: {
+            ESP_LOGI(BT_TAG, "ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT Bond removed");
+            break;
+        }
+                                     
         default: {
             ESP_LOGD(BT_TAG, "Unhandled event: %d", event);
         }
