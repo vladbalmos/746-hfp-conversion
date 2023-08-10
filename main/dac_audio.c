@@ -64,7 +64,7 @@ static void consume_buffers_task_handler(void *arg) {
     ESP_LOGW(DA_TAG, "DAC audio buffer size is: %d", dac_buf_size);
     while (1) {
         if (!enabled) {
-            if (not_enabled_counter++ % 100 == 0) {
+            if (not_enabled_counter++ % 250 == 0) {
                 ESP_LOGW(DA_TAG, "Not enabled");
             }
             vTaskDelay(1);
@@ -74,7 +74,7 @@ static void consume_buffers_task_handler(void *arg) {
         buffered_samples_size = dac_audio_get_rb_size() - xRingbufferGetCurFreeSize(audio_out_rb);
         
         if (buffered_samples_size < min_buffered_samples_size) {
-            if (not_enough_samples_counter++ % 100 == 0) {
+            if (not_enough_samples_counter++ % 250 == 0) {
                 ESP_LOGW(DA_TAG, "Not enough samples. Streaming silence. Expected: %d. Received %d", min_buffered_samples_size, buffered_samples_size);
             }
             goto stream_silence;
@@ -82,7 +82,7 @@ static void consume_buffers_task_handler(void *arg) {
 
         audio_data = xRingbufferReceiveUpTo(audio_out_rb, &received_bytes, 0, dac_buf_size);
         if (!received_bytes) {
-            if (no_samples_counter++ % 100 == 0) {
+            if (no_samples_counter++ % 250 == 0) {
                 ESP_LOGW(DA_TAG, "No bytes received from ring buffer. Streaming silence");
             }
             goto stream_silence;
@@ -97,7 +97,7 @@ static void consume_buffers_task_handler(void *arg) {
             memset(audio_out_buf + received_bytes, 0, dac_buf_size - received_bytes);
         }
         
-        if (enabled_counter++ % 100 == 0) {
+        if (enabled_counter++ % 250 == 0) {
             ESP_LOGW(DA_TAG, "Streaming data");
         }
         received_bytes = 0;
@@ -349,7 +349,7 @@ void dac_audio_send(const uint8_t *buf, size_t size) {
     
     BaseType_t r = xRingbufferSend(audio_out_rb, tmp_audio_buf, bytes_written, 0);
     if (r != pdTRUE) {
-        if (send_fail_counter++ % 100 == 0) {
+        if (send_fail_counter++ % 250 == 0) {
             ESP_LOGW(DA_TAG, "Failed to write audio data to ring buffer %d %d", xRingbufferGetCurFreeSize(audio_out_rb), bytes_written);
         }
     }
