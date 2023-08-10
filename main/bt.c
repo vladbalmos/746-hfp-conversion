@@ -308,9 +308,13 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
             if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED) {
                 ESP_LOGI(BT_TAG, "Initializing dac");
                 dac_audio_init(DAC_SAMPLE_RATE_16KHZ);
+                // Disable discoverability after first pair
+                esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
             } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
                 ESP_LOGI(BT_TAG, "DE_Initializing dac");
                 dac_audio_deinit();
+                // Re-enable discoverability
+                esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
             }
             break;
         }

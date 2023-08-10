@@ -29,7 +29,11 @@ static RingbufHandle_t audio_out_rb = NULL;
 static dac_audio_sample_rate_t dac_sample_rate;
 static uint8_t initialized = 0;
 static uint8_t enabled = 0;
-int send_fail_counter = 0;
+uint64_t send_fail_counter = 0;
+uint64_t not_enabled_counter = 0;
+uint64_t no_samples_counter = 0;
+uint64_t enabled_counter = 0;
+uint64_t not_enough_samples_counter = 0;
 /**
  * Return the buffer size based on current sample rate
  */
@@ -56,10 +60,6 @@ static void consume_buffers_task_handler(void *arg) {
     size_t dac_buf_size = dac_audio_get_buffer_size();
     size_t min_buffered_samples_size = dac_buf_size;
     size_t received_bytes = 0;
-    int not_enabled_counter = 0;
-    int no_samples_counter = 0;
-    int enabled_counter = 0;
-    int not_enough_samples_counter = 0;
 
     ESP_LOGW(DA_TAG, "DAC audio buffer size is: %d", dac_buf_size);
     while (1) {
