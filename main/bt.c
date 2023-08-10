@@ -26,8 +26,10 @@
 static QueueHandle_t bt_msg_queue = NULL;
 static QueueHandle_t bt_outgoing_msg_queue = NULL;
 
-static int rcv_buf_count = 0;
+static uint64_t rcv_buf_count = 0;
+static uint64_t send_buf_count = 0;
 static int64_t last_incoming_buffer_us = 0;
+static int64_t last_outgoing_buffer_us = 0;
 
 const static char *c_hf_evt_str[] = {
     "CONNECTION_STATE_EVT",              /*!< connection state changed event */
@@ -188,8 +190,16 @@ bt_msg_t bt_create_msg(bt_event_type_t ev, void *data, size_t data_size) {
 }
 
 static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
-    // ESP_LOGI(BT_TAG, "OUT Here here");
-    return 0;
+    int64_t now = esp_timer_get_time();
+    int64_t interval = now - last_outgoing_buffer_us;
+    last_outgoing_buffer_us = now;
+
+    if (send_buf_count++ % 100 == 0) {
+        ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, sz, sz / 2);
+    }
+    ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, sz, sz / 2);
+    memset(p_buf, 0, sz);
+    return sz;
 }
 
 static void send_outgoing_message(bt_event_type_t ev, void *data, size_t data_size) {
@@ -204,7 +214,7 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
     last_incoming_buffer_us = now;
     
     if (rcv_buf_count++ % 100 == 0) {
-        ESP_LOGI(BT_TAG, "Buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
+        ESP_LOGI(BT_TAG, "Receive buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
     }
     
     dac_audio_send(buf, size);

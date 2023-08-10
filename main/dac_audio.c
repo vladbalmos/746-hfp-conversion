@@ -1,14 +1,11 @@
 #include <inttypes.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
-#include "freertos/semphr.h"
+// #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "freertos/ringbuf.h"
 #include "driver/dac_continuous.h"
 #include "esp_log.h"
-#include "esp_timer.h"
-#include "esp_heap_caps.h"
 #include "dac_audio.h"
 
 #define DA_TAG "DA"
@@ -111,212 +108,212 @@ stream_silence:
     }
 }
 
-static dac_audio_buffer_t *init_audio_buffer(size_t buffer_size) {
-    uint8_t *bytes = malloc(buffer_size);
-    dac_audio_buffer_t *audio_buffer = malloc(sizeof(dac_audio_buffer_t));
+// static dac_audio_buffer_t *init_audio_buffer(size_t buffer_size) {
+//     uint8_t *bytes = malloc(buffer_size);
+//     dac_audio_buffer_t *audio_buffer = malloc(sizeof(dac_audio_buffer_t));
     
-    if (bytes == NULL) {
-        return NULL;
-    }
+//     if (bytes == NULL) {
+//         return NULL;
+//     }
 
-    if (audio_buffer == NULL) {
-        return NULL;
-    }
+//     if (audio_buffer == NULL) {
+//         return NULL;
+//     }
     
-    audio_buffer->bytes = bytes;
-    audio_buffer->size = buffer_size;
-    audio_buffer->next = NULL;
-    return audio_buffer;
-}
+//     audio_buffer->bytes = bytes;
+//     audio_buffer->size = buffer_size;
+//     audio_buffer->next = NULL;
+//     return audio_buffer;
+// }
 
-uint8_t dac_audio_remaining_free_buffer_slots(dac_audio_buffer_pool_t *pool) {
-    if (pool == NULL) {
-        return 0;
-    }
+// uint8_t dac_audio_remaining_free_buffer_slots(dac_audio_buffer_pool_t *pool) {
+//     if (pool == NULL) {
+//         return 0;
+//     }
     
-    return pool->size - pool->available_buffers_count;
-}
+//     return pool->size - pool->available_buffers_count;
+// }
 
-uint8_t dac_audio_enqueue_free_buffer(dac_audio_buffer_pool_t *pool, dac_audio_buffer_t *buf) {
-    if (!dac_audio_remaining_free_buffer_slots(pool)) {
-        return 0;
-    }
+// uint8_t dac_audio_enqueue_free_buffer(dac_audio_buffer_pool_t *pool, dac_audio_buffer_t *buf) {
+//     if (!dac_audio_remaining_free_buffer_slots(pool)) {
+//         return 0;
+//     }
 
-    memset(buf->bytes, 0, buf->size);
-    buf->next = NULL;
+//     memset(buf->bytes, 0, buf->size);
+//     buf->next = NULL;
 
-    pool->available_buffers_count++;
+//     pool->available_buffers_count++;
 
-    if (pool->free_buffers_queue_head == NULL) {
-        pool->free_buffers_queue_head = buf;
-        pool->free_buffers_queue_tail = buf;
-        return 1;
-    }
+//     if (pool->free_buffers_queue_head == NULL) {
+//         pool->free_buffers_queue_head = buf;
+//         pool->free_buffers_queue_tail = buf;
+//         return 1;
+//     }
     
-    pool->free_buffers_queue_tail->next = buf;
-    pool->free_buffers_queue_tail = buf;
-    return 1;
-}
+//     pool->free_buffers_queue_tail->next = buf;
+//     pool->free_buffers_queue_tail = buf;
+//     return 1;
+// }
 
-uint8_t dac_audio_enqueue_free_buffer_safe(dac_audio_buffer_pool_t *pool, dac_audio_buffer_t *buf, TickType_t wait) {
-    if (!xSemaphoreTake(pool->free_buff_sem, wait)) {
-        ESP_LOGE(DA_TAG, "Free buffer pool is in use (enqueue)");
-        return 0;
-    }
+// uint8_t dac_audio_enqueue_free_buffer_safe(dac_audio_buffer_pool_t *pool, dac_audio_buffer_t *buf, TickType_t wait) {
+//     if (!xSemaphoreTake(pool->free_buff_sem, wait)) {
+//         ESP_LOGE(DA_TAG, "Free buffer pool is in use (enqueue)");
+//         return 0;
+//     }
     
-    uint8_t ret = dac_audio_enqueue_free_buffer(pool, buf);
-    xSemaphoreGive(pool->free_buff_sem);
-    return ret;
-}
+//     uint8_t ret = dac_audio_enqueue_free_buffer(pool, buf);
+//     xSemaphoreGive(pool->free_buff_sem);
+//     return ret;
+// }
 
-dac_audio_buffer_t *dac_audio_take_free_buffer(dac_audio_buffer_pool_t *pool) {
-    if (pool->free_buffers_queue_head == NULL) {
-        return NULL;
-    }
+// dac_audio_buffer_t *dac_audio_take_free_buffer(dac_audio_buffer_pool_t *pool) {
+//     if (pool->free_buffers_queue_head == NULL) {
+//         return NULL;
+//     }
     
-    pool->available_buffers_count--;
+//     pool->available_buffers_count--;
     
-    dac_audio_buffer_t *buf = pool->free_buffers_queue_head;
+//     dac_audio_buffer_t *buf = pool->free_buffers_queue_head;
     
-    if (buf == pool->free_buffers_queue_tail) {
-        pool->free_buffers_queue_head = NULL;
-        pool->free_buffers_queue_tail = NULL;
-    } else {
-        pool->free_buffers_queue_head = buf->next;
-    }
+//     if (buf == pool->free_buffers_queue_tail) {
+//         pool->free_buffers_queue_head = NULL;
+//         pool->free_buffers_queue_tail = NULL;
+//     } else {
+//         pool->free_buffers_queue_head = buf->next;
+//     }
 
-    return buf;
-}
+//     return buf;
+// }
 
-dac_audio_buffer_t *dac_audio_take_free_buffer_safe(dac_audio_buffer_pool_t *pool, TickType_t wait) {
-    if (!xSemaphoreTake(pool->free_buff_sem, wait)) {
-        ESP_LOGE(DA_TAG, "Free buffer pool is in use (take)");
-        return NULL;
-    }
+// dac_audio_buffer_t *dac_audio_take_free_buffer_safe(dac_audio_buffer_pool_t *pool, TickType_t wait) {
+//     if (!xSemaphoreTake(pool->free_buff_sem, wait)) {
+//         ESP_LOGE(DA_TAG, "Free buffer pool is in use (take)");
+//         return NULL;
+//     }
 
-    dac_audio_buffer_t *audio_buf = dac_audio_take_free_buffer(pool);
-    xSemaphoreGive(pool->free_buff_sem);
-    return audio_buf;
-}
+//     dac_audio_buffer_t *audio_buf = dac_audio_take_free_buffer(pool);
+//     xSemaphoreGive(pool->free_buff_sem);
+//     return audio_buf;
+// }
 
-uint8_t dac_audio_enqueue_ready_buffer(dac_audio_buffer_pool_t *pool, dac_audio_buffer_t *buf) {
-    if (!dac_audio_remaining_ready_buffer_slots(pool)) {
-        return 0;
-    }
-    buf->next = NULL;
+// uint8_t dac_audio_enqueue_ready_buffer(dac_audio_buffer_pool_t *pool, dac_audio_buffer_t *buf) {
+//     if (!dac_audio_remaining_ready_buffer_slots(pool)) {
+//         return 0;
+//     }
+//     buf->next = NULL;
 
-    pool->ready_buffers_count++;
+//     pool->ready_buffers_count++;
 
-    if (pool->ready_buffers_queue_head == NULL) {
-        pool->ready_buffers_queue_head = buf;
-        pool->ready_buffers_queue_tail = buf;
-        return 1;
-    }
+//     if (pool->ready_buffers_queue_head == NULL) {
+//         pool->ready_buffers_queue_head = buf;
+//         pool->ready_buffers_queue_tail = buf;
+//         return 1;
+//     }
     
-    pool->ready_buffers_queue_tail->next = buf;
-    pool->ready_buffers_queue_tail = buf;
-    return 1;
-}
+//     pool->ready_buffers_queue_tail->next = buf;
+//     pool->ready_buffers_queue_tail = buf;
+//     return 1;
+// }
 
-uint8_t dac_audio_enqueue_ready_buffer_safe(dac_audio_buffer_pool_t *pool, dac_audio_buffer_t *buf, TickType_t wait) {
-    if (!xSemaphoreTake(pool->ready_buff_sem, wait)) {
-        ESP_LOGE(DA_TAG, "Ready buffer pool is in use (enqueue)");
-        return 0;
-    }
+// uint8_t dac_audio_enqueue_ready_buffer_safe(dac_audio_buffer_pool_t *pool, dac_audio_buffer_t *buf, TickType_t wait) {
+//     if (!xSemaphoreTake(pool->ready_buff_sem, wait)) {
+//         ESP_LOGE(DA_TAG, "Ready buffer pool is in use (enqueue)");
+//         return 0;
+//     }
     
-    uint8_t ret = dac_audio_enqueue_ready_buffer(pool, buf);
-    xSemaphoreGive(pool->ready_buff_sem);
-    return ret;
-}
+//     uint8_t ret = dac_audio_enqueue_ready_buffer(pool, buf);
+//     xSemaphoreGive(pool->ready_buff_sem);
+//     return ret;
+// }
 
-dac_audio_buffer_t *dac_audio_take_ready_buffer(dac_audio_buffer_pool_t *pool) {
-    if (pool->ready_buffers_queue_head == NULL) {
-        return NULL;
-    }
+// dac_audio_buffer_t *dac_audio_take_ready_buffer(dac_audio_buffer_pool_t *pool) {
+//     if (pool->ready_buffers_queue_head == NULL) {
+//         return NULL;
+//     }
     
-    pool->ready_buffers_count--;
+//     pool->ready_buffers_count--;
     
-    dac_audio_buffer_t *buf = pool->ready_buffers_queue_head;
+//     dac_audio_buffer_t *buf = pool->ready_buffers_queue_head;
     
-    if (buf == pool->ready_buffers_queue_tail) {
-        pool->ready_buffers_queue_head = NULL;
-        pool->ready_buffers_queue_tail = NULL;
-    } else {
-        pool->ready_buffers_queue_head = buf->next;
-    }
+//     if (buf == pool->ready_buffers_queue_tail) {
+//         pool->ready_buffers_queue_head = NULL;
+//         pool->ready_buffers_queue_tail = NULL;
+//     } else {
+//         pool->ready_buffers_queue_head = buf->next;
+//     }
 
-    return buf;
-}
+//     return buf;
+// }
 
-dac_audio_buffer_t *dac_audio_take_ready_buffer_safe(dac_audio_buffer_pool_t *pool, TickType_t wait) {
-    if (!xSemaphoreTake(pool->ready_buff_sem, wait)) {
-        ESP_LOGE(DA_TAG, "Ready buffer pool is in use (take)");
-        return NULL;
-    }
+// dac_audio_buffer_t *dac_audio_take_ready_buffer_safe(dac_audio_buffer_pool_t *pool, TickType_t wait) {
+//     if (!xSemaphoreTake(pool->ready_buff_sem, wait)) {
+//         ESP_LOGE(DA_TAG, "Ready buffer pool is in use (take)");
+//         return NULL;
+//     }
 
-    dac_audio_buffer_t *buf = dac_audio_take_ready_buffer(pool);
-    xSemaphoreGive(pool->ready_buff_sem);
-    return buf;
-}
+//     dac_audio_buffer_t *buf = dac_audio_take_ready_buffer(pool);
+//     xSemaphoreGive(pool->ready_buff_sem);
+//     return buf;
+// }
 
-uint8_t dac_audio_remaining_ready_buffer_slots(dac_audio_buffer_pool_t *pool) {
-    if (pool == NULL) {
-        return 0;
-    }
+// uint8_t dac_audio_remaining_ready_buffer_slots(dac_audio_buffer_pool_t *pool) {
+//     if (pool == NULL) {
+//         return 0;
+//     }
     
-    return pool->size - pool->ready_buffers_count;
-}
+//     return pool->size - pool->ready_buffers_count;
+// }
 
-void dac_audio_reset_buffer_pool(dac_audio_buffer_pool_t *pool) {
-    while (pool->ready_buffers_count) {
-        assert(dac_audio_enqueue_free_buffer(pool, dac_audio_take_ready_buffer(pool)) == 1);
-    }
-    ESP_LOGI(DA_TAG, "Buffer pool reset\n");
-    ESP_LOGI(DA_TAG, "Available buffers count %d", pool->available_buffers_count);
-    ESP_LOGI(DA_TAG, "Ready buffers count %d", pool->ready_buffers_count);
-    ESP_LOGI(DA_TAG, "Remaining free buffer slots %d", dac_audio_remaining_free_buffer_slots(pool));
-    ESP_LOGI(DA_TAG, "Remaining ready buffer slots %d", dac_audio_remaining_ready_buffer_slots(pool));
-}
+// void dac_audio_reset_buffer_pool(dac_audio_buffer_pool_t *pool) {
+//     while (pool->ready_buffers_count) {
+//         assert(dac_audio_enqueue_free_buffer(pool, dac_audio_take_ready_buffer(pool)) == 1);
+//     }
+//     ESP_LOGI(DA_TAG, "Buffer pool reset\n");
+//     ESP_LOGI(DA_TAG, "Available buffers count %d", pool->available_buffers_count);
+//     ESP_LOGI(DA_TAG, "Ready buffers count %d", pool->ready_buffers_count);
+//     ESP_LOGI(DA_TAG, "Remaining free buffer slots %d", dac_audio_remaining_free_buffer_slots(pool));
+//     ESP_LOGI(DA_TAG, "Remaining ready buffer slots %d", dac_audio_remaining_ready_buffer_slots(pool));
+// }
 
-dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, size_t buffer_size) {
-    dac_audio_buffer_pool_t *buffer_pool = malloc(sizeof(dac_audio_buffer_pool_t));
+// dac_audio_buffer_pool_t *dac_audio_init_buffer_pool(uint8_t pool_size, size_t buffer_size) {
+//     dac_audio_buffer_pool_t *buffer_pool = malloc(sizeof(dac_audio_buffer_pool_t));
     
 
-    if (buffer_pool == NULL) {
-        return NULL;
-    }
-    buffer_pool->free_buffers_queue_head = NULL;
-    buffer_pool->free_buffers_queue_tail = NULL;
-    buffer_pool->free_buff_sem = xSemaphoreCreateBinary();
-    xSemaphoreGive(buffer_pool->free_buff_sem);
+//     if (buffer_pool == NULL) {
+//         return NULL;
+//     }
+//     buffer_pool->free_buffers_queue_head = NULL;
+//     buffer_pool->free_buffers_queue_tail = NULL;
+//     buffer_pool->free_buff_sem = xSemaphoreCreateBinary();
+//     xSemaphoreGive(buffer_pool->free_buff_sem);
 
-    buffer_pool->ready_buffers_queue_head = NULL;
-    buffer_pool->ready_buffers_queue_tail = NULL;
-    buffer_pool->ready_buff_sem = xSemaphoreCreateBinary();
-    xSemaphoreGive(buffer_pool->ready_buff_sem);
+//     buffer_pool->ready_buffers_queue_head = NULL;
+//     buffer_pool->ready_buffers_queue_tail = NULL;
+//     buffer_pool->ready_buff_sem = xSemaphoreCreateBinary();
+//     xSemaphoreGive(buffer_pool->ready_buff_sem);
 
-    buffer_pool->ready_buffers_count = 0;
-    buffer_pool->available_buffers_count = 0;
-    buffer_pool->size = pool_size;
-    buffer_pool->buffer_size = buffer_size;
+//     buffer_pool->ready_buffers_count = 0;
+//     buffer_pool->available_buffers_count = 0;
+//     buffer_pool->size = pool_size;
+//     buffer_pool->buffer_size = buffer_size;
     
     
-    for (uint8_t i = 0; i < pool_size; i++) {
-        dac_audio_buffer_t *buffer = init_audio_buffer(buffer_size);
-        if (buffer == NULL) {
-            return NULL;
-        }
-        assert(dac_audio_enqueue_free_buffer(buffer_pool, buffer) == 1);
-    }
-    ESP_LOGI(DA_TAG, "Initialized DAC audio buffer pool of %d buffers using %d max sample count", pool_size, buffer_size);
-    ESP_LOGI(DA_TAG, "Buffer pool reset\n");
-    ESP_LOGI(DA_TAG, "Available buffers count %d", buffer_pool->available_buffers_count);
-    ESP_LOGI(DA_TAG, "Ready buffers count %d", buffer_pool->ready_buffers_count);
-    ESP_LOGI(DA_TAG, "Remaining free buffer slots %d", dac_audio_remaining_free_buffer_slots(buffer_pool));
-    ESP_LOGI(DA_TAG, "Remaining ready buffer slots %d", dac_audio_remaining_ready_buffer_slots(buffer_pool));
+//     for (uint8_t i = 0; i < pool_size; i++) {
+//         dac_audio_buffer_t *buffer = init_audio_buffer(buffer_size);
+//         if (buffer == NULL) {
+//             return NULL;
+//         }
+//         assert(dac_audio_enqueue_free_buffer(buffer_pool, buffer) == 1);
+//     }
+//     ESP_LOGI(DA_TAG, "Initialized DAC audio buffer pool of %d buffers using %d max sample count", pool_size, buffer_size);
+//     ESP_LOGI(DA_TAG, "Buffer pool reset\n");
+//     ESP_LOGI(DA_TAG, "Available buffers count %d", buffer_pool->available_buffers_count);
+//     ESP_LOGI(DA_TAG, "Ready buffers count %d", buffer_pool->ready_buffers_count);
+//     ESP_LOGI(DA_TAG, "Remaining free buffer slots %d", dac_audio_remaining_free_buffer_slots(buffer_pool));
+//     ESP_LOGI(DA_TAG, "Remaining ready buffer slots %d", dac_audio_remaining_ready_buffer_slots(buffer_pool));
     
-    return buffer_pool;
-}
+//     return buffer_pool;
+// }
 
 void dac_audio_send(const uint8_t *buf, size_t size) {
     if (!enabled) {
@@ -384,6 +381,10 @@ dac_audio_sample_rate_t dac_audio_get_sample_rate() {
 }
 
 void dac_audio_init(dac_audio_sample_rate_t sample_rate) {
+    if (initialized) {
+        return;
+    }
+
     assert(sample_rate != DAC_SAMPLE_RATE_NONE);
     dac_sample_rate = sample_rate;
 
