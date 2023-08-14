@@ -14,6 +14,7 @@
 #include "esp_gap_bt_api.h"
 #include "esp_hf_client_api.h"
 #include "esp_log.h"
+#include "adc_audio.h"
 #include "dac_audio.h"
 #include "bt.h"
 
@@ -221,20 +222,25 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
 }
 
 static void bt_hf_client_audio_open(esp_hf_client_audio_state_t con_state) {
-    dac_audio_sample_rate_t dac_current_sample_rate = dac_audio_get_sample_rate();
-    dac_audio_sample_rate_t dac_new_sample_rate = (con_state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) 
-                                                   ? DAC_SAMPLE_RATE_16KHZ : DAC_SAMPLE_RATE_8KHZ;
+    sample_rate_t current_sample_rate = dac_audio_get_sample_rate();
+    sample_rate_t new_sample_rate = (con_state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) 
+                                                   ? SAMPLE_RATE_16KHZ : SAMPLE_RATE_8KHZ;
                                                    
-    if (dac_current_sample_rate != dac_new_sample_rate) {
+    if (current_sample_rate != new_sample_rate) {
         dac_audio_deinit();
-        dac_audio_init(dac_new_sample_rate);
+        dac_audio_init(new_sample_rate);
+        
+        // adc_audio_deinit();
+        // adc_audio_init(new_sample_rate, (QueueHandle_t) NULL);
     }
     
     dac_audio_enable(1);
+    // adc_audio_enable(1);
 }
 
 static void bt_hf_client_audio_close() {
     dac_audio_enable(0);
+    // adc_audio_enable(0);
 }
 
 static void esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
@@ -317,7 +323,10 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
             
             if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED) {
                 ESP_LOGI(BT_TAG, "Initializing dac");
-                dac_audio_init(DAC_SAMPLE_RATE_16KHZ);
+                // dac_audio_init(SAMPLE_RATE_16KHZ);
+                // adc_audio_init(SAMPLE_RATE_16KHZ, (QueueHandle_t) NULL);
+                adc_audio_init(SAMPLE_RATE_8KHZ, (QueueHandle_t) NULL);
+                adc_audio_enable(1);
                 // Disable discoverability after first pair
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
             } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
@@ -567,7 +576,7 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     bt_msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
     assert(bt_msg_queue != NULL);
 
-    BaseType_t r = xTaskCreate(bt_msg_handler, "bt_msg_handler", 2048, NULL, configMAX_PRIORITIES - 3, NULL);
+    BaseType_t r = xTaskCreate(bt_msg_handler, "bt_msg_handler", 4096, NULL, configMAX_PRIORITIES - 3, NULL);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created bluetooth task");
     
