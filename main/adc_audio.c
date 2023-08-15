@@ -37,7 +37,7 @@ static uint64_t adc_invalid_counter = 0;
 static uint64_t adc_read_ok_counter = 0;
 static uint64_t adc_stats_counter = 0;
 
-static inline size_t adc_audio_get_conv_frame_size() {
+static inline size_t adc_audio_get_buffer_size() {
     if (adc_sample_rate == SAMPLE_RATE_16KHZ) {
         return SOC_ADC_DIGI_DATA_BYTES_PER_CONV * ADC_16KHZ_SAMPLES_NUM;
     }
@@ -59,18 +59,21 @@ static inline uint64_t adc_read_get_period() {
 
 
 static inline size_t adc_audio_get_rb_size() {
-    return 4 * adc_audio_get_conv_frame_size();
+    return 4 * adc_audio_get_buffer_size();
 }
 
 static void provide_audio_task_handler(void *arg) {
     audio_provider_task_input_t *task_input = (audio_provider_task_input_t *) arg;
     RingbufHandle_t audio_in_rb = task_input->rb;
-    QueueHandle_t notif_queue = task_input->notif_queue;
+    QueueHandle_t notif_queue = task_input->adc_read_notif_queue;
+    QueueHandle_t audio_available_queue = task_input->audio_available_notif_queue;
     esp_err_t adc_read_result;
     
     int raw_sample;
     int16_t pcm_sample;
     uint8_t _;
+    size_t buf_size = adc_audio_get_buffer_size();
+    uint16_t read_bytes = 0;
 
     uint16_t stats_period = 1000000 / adc_read_get_period();
     
@@ -107,9 +110,17 @@ static void provide_audio_task_handler(void *arg) {
         }
         
         pcm_sample = raw_sample - ADC_MIDPOINT;
-        int64_t read_duration = esp_timer_get_time() - start_read;
+        audio_in_buf[read_bytes] = pcm_sample;
+        
+        if (read_bytes >= (buf_size - 1)) {
+            xRingbufferSend(audio_in_rb, audio_in_buf, read_bytes, 0);
+            xQueueSend(audio_available_queue, &_, 0);
+            read_bytes = 0;
+        } else {
+            read_bytes += ADC_SAMPLE_SIZE;
+        }
 
-        xRingbufferSend(audio_in_rb, &pcm_sample, ADC_SAMPLE_SIZE, 0);
+        int64_t read_duration = esp_timer_get_time() - start_read;
 
         if (adc_read_ok_counter++ % 5000 == 0) {
             ESP_LOGI(AD_TAG, "Read ok. Raw data %d %d", raw_sample, pcm_sample);
@@ -117,15 +128,6 @@ static void provide_audio_task_handler(void *arg) {
         if (adc_stats_counter++ % stats_period == 0) {
             ESP_LOGI(AD_TAG, "Last sample (us) %"PRId64" ADC read duration: %"PRId64, interval, read_duration);
         }
-        
-        
-        
-        // @TODO: Read from ADC
-        //        Convert sample to PCM:
-        //            - bias microphone correctly
-        //            - subtract 2048
-        //        Add to ring buffer
-        //        When reached desired length, post "audio available" message to bt queue
     }
 }
 
@@ -133,6 +135,27 @@ static void signal_adc_read_timer_callback(void *arg) {
     QueueHandle_t notif_queue = (QueueHandle_t) arg;
     uint8_t _ = 1;
     xQueueSend(notif_queue, &_, 0);
+}
+
+void adc_audio_receive(uint8_t *dst, size_t *received, size_t requested_size) {
+    if (!initialized || !enabled) {
+        *received = 0;
+        return;
+    }
+    
+    uint8_t *data = xRingbufferReceiveUpTo(audio_in_rb, received, 0, requested_size);
+    
+    if (*received == requested_size) {
+        memcpy(dst, data, *received);
+        vRingbufferReturnItem(audio_in_rb, data);
+        return;
+    }
+    
+    if (*received) {
+        vRingbufferReturnItem(audio_in_rb, data);
+    }
+    
+    return;
 }
 
 void adc_audio_enable(uint8_t status) {
@@ -163,12 +186,13 @@ void adc_audio_init(sample_rate_t sample_rate, QueueHandle_t data_ready_queue) {
     assert(sample_rate != SAMPLE_RATE_NONE);
     adc_sample_rate = sample_rate;
     
-    size_t conv_frame_size = adc_audio_get_conv_frame_size();
+    size_t adc_buf_size = adc_audio_get_buffer_size();
     uint16_t sample_rate_hz = (sample_rate == SAMPLE_RATE_16KHZ) ? 16000 : 8000;
-    ESP_LOGI(AD_TAG, "Initializing ADC. Sample rate: %d. Buffer size: %d", sample_rate_hz, conv_frame_size);
+    ESP_LOGI(AD_TAG, "Initializing ADC. Sample rate: %d. Buffer size: %d", sample_rate_hz, adc_buf_size);
 
-    audio_in_buf = malloc(conv_frame_size);
+    audio_in_buf = malloc(adc_buf_size);
     assert(audio_in_buf != NULL);
+    memset(audio_in_buf, '\0', adc_buf_size);
     
     adc_oneshot_unit_init_cfg_t adc_config = {
         .unit_id = ADC_UNIT_1
@@ -185,7 +209,8 @@ void adc_audio_init(sample_rate_t sample_rate, QueueHandle_t data_ready_queue) {
     assert(audio_in_rb != NULL);
     
     adc_read_notif_queue = xQueueCreate(4, sizeof(uint8_t));
-    audio_provider_task_input.notif_queue = adc_read_notif_queue;
+    audio_provider_task_input.adc_read_notif_queue = adc_read_notif_queue;
+    audio_provider_task_input.audio_available_notif_queue = data_ready_queue;
     audio_provider_task_input.rb = audio_in_rb;
 
     BaseType_t r = xTaskCreate(provide_audio_task_handler, "provide_audio", 4096, &audio_provider_task_input, 15, &audio_provider_task);
@@ -220,7 +245,8 @@ void adc_audio_deinit() {
     vRingbufferDelete(audio_in_rb);
     audio_in_rb = NULL;
     
-    audio_provider_task_input.notif_queue = NULL;
+    audio_provider_task_input.adc_read_notif_queue = NULL;
+    audio_provider_task_input.audio_available_notif_queue = NULL;
     audio_provider_task_input.rb = NULL;
 
     free(audio_in_buf);

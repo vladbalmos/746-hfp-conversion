@@ -25,12 +25,14 @@
 #define BT_DEVICE_NAME "GPO 746"
 
 static QueueHandle_t bt_msg_queue = NULL;
+static QueueHandle_t bt_audio_data_available_queue = NULL;
 static QueueHandle_t bt_outgoing_msg_queue = NULL;
 
 static uint64_t rcv_buf_count = 0;
 static uint64_t send_buf_count = 0;
 static int64_t last_incoming_buffer_us = 0;
 static int64_t last_outgoing_buffer_us = 0;
+static uint8_t audio_enabled = 0;
 
 const static char *c_hf_evt_str[] = {
     "CONNECTION_STATE_EVT",              /*!< connection state changed event */
@@ -194,13 +196,16 @@ static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
     int64_t now = esp_timer_get_time();
     int64_t interval = now - last_outgoing_buffer_us;
     last_outgoing_buffer_us = now;
+    
+    size_t item_size = 0;
+    
+    adc_audio_receive(p_buf, &item_size, sz);
 
     if (send_buf_count++ % 100 == 0) {
         ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, sz, sz / 2);
     }
-    ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, sz, sz / 2);
-    memset(p_buf, 0, sz);
-    return sz;
+    
+    return (item_size == sz) ? sz : 0;
 }
 
 static void send_outgoing_message(bt_event_type_t ev, void *data, size_t data_size) {
@@ -227,20 +232,20 @@ static void bt_hf_client_audio_open(esp_hf_client_audio_state_t con_state) {
                                                    ? SAMPLE_RATE_16KHZ : SAMPLE_RATE_8KHZ;
                                                    
     if (current_sample_rate != new_sample_rate) {
-        dac_audio_deinit();
-        dac_audio_init(new_sample_rate);
+        // dac_audio_deinit();
+        // dac_audio_init(new_sample_rate);
         
-        // adc_audio_deinit();
-        // adc_audio_init(new_sample_rate, (QueueHandle_t) NULL);
+        adc_audio_deinit();
+        adc_audio_init(new_sample_rate, bt_audio_data_available_queue);
     }
     
-    dac_audio_enable(1);
-    // adc_audio_enable(1);
+    // dac_audio_enable(1);
+    adc_audio_enable(1);
 }
 
 static void bt_hf_client_audio_close() {
-    dac_audio_enable(0);
-    // adc_audio_enable(0);
+    // dac_audio_enable(0);
+    adc_audio_enable(0);
 }
 
 static void esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
@@ -324,14 +329,13 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
             if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED) {
                 ESP_LOGI(BT_TAG, "Initializing dac");
                 // dac_audio_init(SAMPLE_RATE_16KHZ);
-                // adc_audio_init(SAMPLE_RATE_16KHZ, (QueueHandle_t) NULL);
-                adc_audio_init(SAMPLE_RATE_8KHZ, (QueueHandle_t) NULL);
-                adc_audio_enable(1);
+                adc_audio_init(SAMPLE_RATE_16KHZ, bt_audio_data_available_queue);
                 // Disable discoverability after first pair
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
             } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
                 ESP_LOGI(BT_TAG, "DE_Initializing dac");
-                dac_audio_deinit();
+                // dac_audio_deinit();
+                adc_audio_deinit();
                 // Re-enable discoverability
                 esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
             }
@@ -350,8 +354,10 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
                 } else {
                     ESP_LOGE(BT_TAG, "cvsd connection");
                 }
+                audio_enabled = 1;
                 bt_hf_client_audio_open(param->audio_stat.state);
             } else {
+                audio_enabled = 0;
                 bt_hf_client_audio_close();
             }
             
@@ -528,6 +534,24 @@ static void bt_init_stack() {
     esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
 }
 
+static void bt_signal_audio_ready_handler(void *arg) {
+    uint8_t _;
+
+    while (1) {
+        if (xQueueReceive(bt_audio_data_available_queue, &_, (TickType_t)portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        
+        if (!audio_enabled) {
+            vTaskDelay(1);
+            continue;
+        }
+        
+        // Signal that audio data is available for sending
+        esp_hf_client_outgoing_data_ready();
+    }
+}
+
 static void bt_msg_handler(void *arg) {
     bt_msg_t msg;
     while (1) {
@@ -575,8 +599,15 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     bt_outgoing_msg_queue = outgoing_msg_queue;
     bt_msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
     assert(bt_msg_queue != NULL);
+    
+    bt_audio_data_available_queue = xQueueCreate(4, sizeof(uint8_t));
+    assert(bt_audio_data_available_queue != NULL);
 
-    BaseType_t r = xTaskCreate(bt_msg_handler, "bt_msg_handler", 4096, NULL, configMAX_PRIORITIES - 3, NULL);
+    BaseType_t r = xTaskCreate(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 2048, NULL, configMAX_PRIORITIES - 4, NULL);
+    assert(r == pdPASS);
+    ESP_LOGI(BT_TAG, "Created audio handler task");
+
+    r = xTaskCreate(bt_msg_handler, "bt_msg_handler", 4096, NULL, configMAX_PRIORITIES - 3, NULL);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created bluetooth task");
     
