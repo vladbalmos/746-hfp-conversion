@@ -39,10 +39,10 @@ static uint64_t adc_stats_counter = 0;
 
 static inline size_t adc_audio_get_buffer_size() {
     if (adc_sample_rate == SAMPLE_RATE_16KHZ) {
-        return SOC_ADC_DIGI_DATA_BYTES_PER_CONV * ADC_16KHZ_SAMPLES_NUM;
+        return ADC_16KHZ_SAMPLES_NUM;
     }
     if (adc_sample_rate == SAMPLE_RATE_8KHZ) {
-        return SOC_ADC_DIGI_DATA_BYTES_PER_CONV * ADC_8KHZ_SAMPLES_NUM;
+        return ADC_8KHZ_SAMPLES_NUM;
     }
     return 0;
 }
@@ -87,12 +87,11 @@ static void provide_audio_task_handler(void *arg) {
         }
         
         if (xQueueReceive(notif_queue, &_, (TickType_t)portMAX_DELAY) != pdTRUE) {
+            if (adc_not_enabled_counter++ % stats_period == 0) {
+                ESP_LOGW(AD_TAG, "Not enabled");
+            }
             continue;
         }
-        int64_t now = esp_timer_get_time();
-        int64_t interval = now - last_incoming_sample_us;
-        last_incoming_sample_us = now;
-        
         int64_t start_read = esp_timer_get_time();
         adc_read_result = adc_oneshot_read(adc_handle, ADC_CHANNEL_0, &raw_sample);
         
@@ -112,29 +111,34 @@ static void provide_audio_task_handler(void *arg) {
         pcm_sample = raw_sample - ADC_MIDPOINT;
         audio_in_buf[read_bytes] = pcm_sample;
         
-        if (read_bytes >= (buf_size - 1)) {
+        if (read_bytes >= buf_size) {
+            int64_t now = esp_timer_get_time();
+            int64_t interval = now - last_incoming_sample_us;
+            last_incoming_sample_us = now;
+        
             xRingbufferSend(audio_in_rb, audio_in_buf, read_bytes, 0);
             xQueueSend(audio_available_queue, &_, 0);
+            int64_t read_duration = esp_timer_get_time() - start_read;
+
+            if (adc_stats_counter++ % 250 == 0) {
+                ESP_LOGI(AD_TAG, "Last sample (us) %"PRId64" ADC read duration: %"PRId64". Read bytes: %d. Buf size: %d", interval, read_duration, read_bytes, buf_size);
+            }
             read_bytes = 0;
         } else {
             read_bytes += ADC_SAMPLE_SIZE;
         }
 
-        int64_t read_duration = esp_timer_get_time() - start_read;
 
-        if (adc_read_ok_counter++ % 5000 == 0) {
-            ESP_LOGI(AD_TAG, "Read ok. Raw data %d %d", raw_sample, pcm_sample);
-        }
-        if (adc_stats_counter++ % stats_period == 0) {
-            ESP_LOGI(AD_TAG, "Last sample (us) %"PRId64" ADC read duration: %"PRId64, interval, read_duration);
-        }
+        // if (adc_read_ok_counter++ % 5000 == 0) {
+        //     ESP_LOGI(AD_TAG, "Read ok. Raw data %d %d", raw_sample, pcm_sample);
+        // }
     }
 }
 
 static void signal_adc_read_timer_callback(void *arg) {
     QueueHandle_t notif_queue = (QueueHandle_t) arg;
     uint8_t _ = 1;
-    xQueueSend(notif_queue, &_, 0);
+    xQueueSendFromISR(notif_queue, &_, NULL);
 }
 
 void adc_audio_receive(uint8_t *dst, size_t *received, size_t requested_size) {
@@ -213,13 +217,14 @@ void adc_audio_init(sample_rate_t sample_rate, QueueHandle_t data_ready_queue) {
     audio_provider_task_input.audio_available_notif_queue = data_ready_queue;
     audio_provider_task_input.rb = audio_in_rb;
 
-    BaseType_t r = xTaskCreate(provide_audio_task_handler, "provide_audio", 4096, &audio_provider_task_input, 15, &audio_provider_task);
+    BaseType_t r = xTaskCreatePinnedToCore(provide_audio_task_handler, "provide_audio", 4096, &audio_provider_task_input, 15, &audio_provider_task, 1);
     assert(r == pdPASS);
     
     const esp_timer_create_args_t adc_read_timer_args = {
         .callback = &signal_adc_read_timer_callback,
         .arg = (void *) adc_read_notif_queue,
-        .name = "adc-read-timer"
+        .name = "adc-read-timer",
+        .skip_unhandled_events = true
     };
     ESP_ERROR_CHECK(esp_timer_create(&adc_read_timer_args, &adc_read_timer));
     

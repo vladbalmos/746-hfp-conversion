@@ -34,6 +34,8 @@ static int64_t last_incoming_buffer_us = 0;
 static int64_t last_outgoing_buffer_us = 0;
 static uint8_t audio_enabled = 0;
 
+static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz);
+
 const static char *c_hf_evt_str[] = {
     "CONNECTION_STATE_EVT",              /*!< connection state changed event */
     "AUDIO_STATE_EVT",                   /*!< audio connection state change event */
@@ -175,6 +177,31 @@ const char *c_inband_ring_state_str[] = {
     "Provided",
 };
 
+static void bt_signal_audio_ready_handler(void *arg) {
+    uint8_t _;
+    uint8_t buf[240] = {0};
+    uint8_t notified = 0;
+
+    while (1) {
+        if (xQueueReceive(bt_audio_data_available_queue, &_, (TickType_t)portMAX_DELAY) != pdTRUE) {
+            vTaskDelay(1);
+            continue;
+        }
+        
+        if (!audio_enabled) {
+            vTaskDelay(1);
+            continue;
+        }
+
+        
+        // Signal that audio data is available for sending
+        if (notified++ == 12) {
+            esp_hf_client_outgoing_data_ready();
+            notified = 0;
+        }
+    }
+}
+
 bt_msg_t bt_create_msg(bt_event_type_t ev, void *data, size_t data_size) {
     bt_msg_t msg;
 
@@ -198,14 +225,17 @@ static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
     last_outgoing_buffer_us = now;
     
     size_t item_size = 0;
+    // size_t item_size = sz;
+    // memset(p_buf, 0, sz);
     
     adc_audio_receive(p_buf, &item_size, sz);
+    uint32_t ret = (item_size == sz) ? sz : 0;
 
     if (send_buf_count++ % 100 == 0) {
-        ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, sz, sz / 2);
+        ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %"PRId32", Sample count: %"PRId32". Return value: %"PRId32, interval, sz, sz / 2, ret);
     }
     
-    return (item_size == sz) ? sz : 0;
+    return ret;
 }
 
 static void send_outgoing_message(bt_event_type_t ev, void *data, size_t data_size) {
@@ -219,9 +249,9 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
     int64_t interval = now - last_incoming_buffer_us;
     last_incoming_buffer_us = now;
     
-    if (rcv_buf_count++ % 100 == 0) {
-        ESP_LOGI(BT_TAG, "Receive buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
-    }
+    // if (rcv_buf_count++ % 100 == 0) {
+    //     ESP_LOGI(BT_TAG, "Receive buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
+    // }
     
     dac_audio_send(buf, size);
 }
@@ -534,24 +564,6 @@ static void bt_init_stack() {
     esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
 }
 
-static void bt_signal_audio_ready_handler(void *arg) {
-    uint8_t _;
-
-    while (1) {
-        if (xQueueReceive(bt_audio_data_available_queue, &_, (TickType_t)portMAX_DELAY) != pdTRUE) {
-            continue;
-        }
-        
-        if (!audio_enabled) {
-            vTaskDelay(1);
-            continue;
-        }
-        
-        // Signal that audio data is available for sending
-        esp_hf_client_outgoing_data_ready();
-    }
-}
-
 static void bt_msg_handler(void *arg) {
     bt_msg_t msg;
     while (1) {
@@ -596,14 +608,15 @@ void bt_task_send(bt_event_type_t ev, void *data, size_t data_size) {
 }
 
 void bt_init(QueueHandle_t outgoing_msg_queue) {
+    BaseType_t r;
     bt_outgoing_msg_queue = outgoing_msg_queue;
     bt_msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
     assert(bt_msg_queue != NULL);
     
-    bt_audio_data_available_queue = xQueueCreate(4, sizeof(uint8_t));
+    bt_audio_data_available_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(bt_audio_data_available_queue != NULL);
 
-    BaseType_t r = xTaskCreate(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 2048, NULL, configMAX_PRIORITIES - 4, NULL);
+    r = xTaskCreatePinnedToCore(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 4096, NULL, 15, NULL, 1);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created audio handler task");
 
