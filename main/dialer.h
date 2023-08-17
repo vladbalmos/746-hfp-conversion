@@ -13,6 +13,7 @@ typedef void (*dialer_end_callback_t)(const char *dialed_number, uint8_t number_
 
 
 void dialer_init(gpio_num_t dialer_pin,
+                 gpio_num_t hook_power_pin,
                  gpio_num_t hook_switch_pin,
                  dialer_headset_state_callback_t headset_state_callback,
                  dialer_start_callback_t start_callback,

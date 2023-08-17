@@ -168,6 +168,7 @@ static void process_irq_events(void *arg) {
 }
 
 void dialer_init(gpio_num_t pin,
+                 gpio_num_t hsw_power_pin,
                  gpio_num_t hsw_pin,
                  dialer_headset_state_callback_t on_headset_state_change_callback,
                  dialer_start_callback_t start_callback,
@@ -197,16 +198,23 @@ void dialer_init(gpio_num_t pin,
     ESP_ERROR_CHECK(esp_timer_create(&end_dialing_timer_args, &signal_end_dialing_timer));
     ESP_ERROR_CHECK(esp_timer_create(&hook_switch_timer_args, &hook_switch_query_state_timer));
 
-    gpio_config_t io_conf = {};
-    io_conf.intr_type = GPIO_INTR_ANYEDGE;
-    io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pin_bit_mask = (1ULL << dialer_pin) | (1ULL << hook_switch_pin);
-    io_conf.pull_up_en = 0;
-    io_conf.pull_down_en = 1;
-    ESP_ERROR_CHECK(gpio_config(&io_conf));
-
+    gpio_config_t input_conf = {};
+    input_conf.intr_type = GPIO_INTR_ANYEDGE;
+    input_conf.mode = GPIO_MODE_INPUT;
+    input_conf.pin_bit_mask = (1ULL << dialer_pin) | (1ULL << hook_switch_pin);
+    input_conf.pull_up_en = 0;
+    input_conf.pull_down_en = 1;
+    ESP_ERROR_CHECK(gpio_config(&input_conf));
     ESP_ERROR_CHECK(gpio_isr_handler_add(dialer_pin, gpio_isr_handler, (void *) dialer_pin));
     ESP_ERROR_CHECK(gpio_isr_handler_add(hook_switch_pin, gpio_isr_handler, (void *)hook_switch_pin));
+
+    gpio_config_t output_conf = {};
+    output_conf.intr_type = GPIO_INTR_DISABLE;
+    output_conf.mode = GPIO_MODE_OUTPUT;
+    output_conf.pin_bit_mask = 1ULL << hsw_power_pin;
+    ESP_ERROR_CHECK(gpio_config(&output_conf));
+    ESP_ERROR_CHECK(gpio_set_level(hsw_power_pin, 1));
+    
     
     irq_event_queue = xQueueCreate(32, sizeof(uint32_t));
     

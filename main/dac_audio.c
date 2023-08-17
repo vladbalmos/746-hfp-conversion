@@ -205,7 +205,7 @@ void dac_audio_init(sample_rate_t sample_rate) {
     audio_out_rb = xRingbufferCreate(dac_audio_get_rb_size(), RINGBUF_TYPE_BYTEBUF);
     assert(audio_out_rb != NULL);
 
-    BaseType_t r = xTaskCreate(consume_audio_task_handler, "consume_audio", 2048, audio_out_rb, 15, &audio_consumer_task);
+    BaseType_t r = xTaskCreatePinnedToCore(consume_audio_task_handler, "consume_audio", 2048, audio_out_rb, 15, &audio_consumer_task, 1);
     assert(r == pdPASS);
     
     initialized = 1;

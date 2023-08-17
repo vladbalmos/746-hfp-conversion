@@ -21,10 +21,11 @@
 #define TAG "MAIN"
 
 #define ESP_INTR_FLAG_DEFAULT 0
-#define DIALER_PULSE_PIN 16
-#define HOOK_SWITCH_PIN 17
-#define RINGER_SIGNAL_PIN 5
-#define RINGER_ENABLE_PIN 18
+#define DIALER_PULSE_PIN 15
+#define HOOK_POWER_PIN 4
+#define HOOK_SWITCH_PIN 2
+#define RINGER_SIGNAL_PIN 16
+#define RINGER_ENABLE_PIN 17
 
 static uint8_t incoming_call_alert = 0;
 static uint8_t call_in_progress = 0;
@@ -68,7 +69,7 @@ void app_main(void) {
     // Initialize phone interface
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT));
     
-    dialer_init(DIALER_PULSE_PIN, HOOK_SWITCH_PIN, on_headset_state_change, on_start_dialing, on_digit, on_end_dialing);
+    dialer_init(DIALER_PULSE_PIN, HOOK_POWER_PIN, HOOK_SWITCH_PIN, on_headset_state_change, on_start_dialing, on_digit, on_end_dialing);
     dialer_enable(1);
     
     ringer_init(RINGER_ENABLE_PIN, RINGER_SIGNAL_PIN);

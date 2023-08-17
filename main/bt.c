@@ -195,10 +195,10 @@ static void bt_signal_audio_ready_handler(void *arg) {
 
         
         // Signal that audio data is available for sending
-        if (notified++ == 12) {
+        // if (notified++ == 12) {
             esp_hf_client_outgoing_data_ready();
-            notified = 0;
-        }
+            // notified = 0;
+        // }
     }
 }
 
@@ -620,7 +620,7 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created audio handler task");
 
-    r = xTaskCreate(bt_msg_handler, "bt_msg_handler", 4096, NULL, configMAX_PRIORITIES - 3, NULL);
+    r = xTaskCreatePinnedToCore(bt_msg_handler, "bt_msg_handler", 4096, NULL, configMAX_PRIORITIES - 3, NULL, 1);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created bluetooth task");
     
