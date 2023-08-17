@@ -13,7 +13,6 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_log.h"
-#include "dac_audio.h"
 #include "bt.h"
 #include "dialer.h"
 #include "ringer.h"
