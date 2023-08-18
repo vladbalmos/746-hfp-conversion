@@ -33,6 +33,7 @@ static uint8_t initialized = 0;
 static uint8_t enabled = 0;
 static int64_t last_incoming_buffer_us = 0;
 
+static uint64_t debug_counter = 0;
 static uint64_t sent_buf_counter = 0;
 static uint64_t send_fail_counter = 0;
 static uint64_t not_enabled_counter = 0;
@@ -196,14 +197,17 @@ void dac_audio_send(const uint8_t *buf, size_t size) {
     // int16_t *src = (int16_t *) buf;
     uint16_t *dst = (uint16_t *) tmp_audio_buf;
     
-    for (int i = 0; i < samples_to_write; i++) {
-        printf("%d ", src[i]);
-        if (i && i % 8 == 0) {
-            printf("\n");
+    if (debug_counter++ % 1000 == 0) {
+        for (int i = 0; i < samples_to_write; i++) {
+            printf("%d ", src[i]);
+            if (i && i % 8 == 0) {
+                printf("\n");
+            }
         }
-    }
     
-    printf("\n");
+        printf("\n=================================================\n");
+    }
+
 
     // TLC5615 (10bit DAC) expects the data to be formatted as follows:
     // 4 upper dummy bits, 10 data bits, 2 extra (don't care) sub-LSB bits
