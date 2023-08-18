@@ -197,17 +197,6 @@ void dac_audio_send(const uint8_t *buf, size_t size) {
     // int16_t *src = (int16_t *) buf;
     uint16_t *dst = (uint16_t *) tmp_audio_buf;
     
-    if (debug_counter++ % 1000 == 0) {
-        for (int i = 0; i < samples_to_write; i++) {
-            printf("%d ", src[i]);
-            if (i && i % 8 == 0) {
-                printf("\n");
-            }
-        }
-    
-        printf("\n=================================================\n");
-    }
-
 
     // TLC5615 (10bit DAC) expects the data to be formatted as follows:
     // 4 upper dummy bits, 10 data bits, 2 extra (don't care) sub-LSB bits
@@ -215,6 +204,29 @@ void dac_audio_send(const uint8_t *buf, size_t size) {
         dst[i] = ((src[i] - INT16_MIN) >> 6) << 2;
         bytes_written += DAC_SAMPLE_SIZE;
     }
+
+    // if (debug_counter++ % 1000 == 0) {
+    //     printf("\nOriginal\n");
+    //     for (int i = 0; i < samples_to_write; i++) {
+    //         printf("%d ", src[i]);
+    //         if (i && i % 8 == 0) {
+    //             printf("\n");
+    //         }
+    //     }
+    
+    //     printf("\n=================================================\n");
+
+    //     printf("\nConverted\n");
+    //     for (int i = 0; i < samples_to_write; i++) {
+    //         printf("%d ", dst[i]);
+    //         if (i && i % 8 == 0) {
+    //             printf("\n");
+    //         }
+    //     }
+    
+    //     printf("\n=================================================\n");
+    // }
+
     
     BaseType_t r = xRingbufferSend(audio_out_rb, tmp_audio_buf, bytes_written, 0);
     if (r != pdTRUE) {
@@ -275,7 +287,7 @@ void dac_audio_init(sample_rate_t sample_rate) {
     assert(r == pdPASS);
 
     // Setup bus
-    spi_bus_cfg.miso_io_num = MISO_PIN; // we're not interested in reading
+    spi_bus_cfg.miso_io_num = -1; // we're not interested in reading
     spi_bus_cfg.mosi_io_num = MOSI_PIN;
     spi_bus_cfg.sclk_io_num = CLK_PIN;
     spi_bus_cfg.quadwp_io_num = -1;
@@ -284,7 +296,11 @@ void dac_audio_init(sample_rate_t sample_rate) {
 
     // Setup device
     spi_dev_cfg.clock_speed_hz = spi_clock_speed_hz;
+    // spi_dev_cfg.clock_speed_hz = 8000;
     spi_dev_cfg.mode = 0;
+    spi_dev_cfg.command_bits = 0;
+    spi_dev_cfg.address_bits = 0;
+    spi_dev_cfg.dummy_bits = 0;
     spi_dev_cfg.spics_io_num = CS_PIN;
     spi_dev_cfg.queue_size = SPI_QUEUE_SIZE;
     spi_dev_cfg.post_cb = &post_spi_tx_callback;
