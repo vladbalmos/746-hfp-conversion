@@ -249,9 +249,9 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
     int64_t interval = now - last_incoming_buffer_us;
     last_incoming_buffer_us = now;
     
-    // if (rcv_buf_count++ % 100 == 0) {
-    //     ESP_LOGI(BT_TAG, "Receive buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
-    // }
+    if (rcv_buf_count++ % 100 == 0) {
+        ESP_LOGI(BT_TAG, "Receive buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
+    }
     
     dac_audio_send(buf, size);
 }
@@ -359,6 +359,7 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
             if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED) {
                 ESP_LOGI(BT_TAG, "Initializing dac");
                 dac_audio_init(SAMPLE_RATE_16KHZ);
+                // dac_audio_enable(1);
                 // adc_audio_init(SAMPLE_RATE_16KHZ, bt_audio_data_available_queue);
                 // Disable discoverability after first pair
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);

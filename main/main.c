@@ -113,6 +113,8 @@ void app_main(void) {
     bt_init(bt_msg_queue);
     
     bt_msg_t msg;
+    
+    ESP_LOGI(TAG, "10 ms = %"PRId32" tick", pdMS_TO_TICKS(10));
 
     while(1) {
         if (xQueueReceive(bt_msg_queue, &msg, portMAX_DELAY) != pdTRUE) {

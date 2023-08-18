@@ -122,10 +122,9 @@ void dac_audio_send(const uint8_t *buf, size_t size) {
         samples_to_write = tmp_audio_buf_size;
     }
     
-    int16_t *src = (int16_t *) buf;
+    int16_t *src = (int16_t *) (dac_sample_rate == SAMPLE_RATE_16KHZ) ? sinewave_16000 : sinewave_8000;
     uint8_t *dst = tmp_audio_buf;
 
-    // TODO: convert to 10 bit values stored in 16 bit
     for (size_t i = 0; i < samples_to_write; i++) {
         float dither = ((float)rand() / (float)RAND_MAX) - 0.5f;
 
