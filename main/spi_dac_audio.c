@@ -103,11 +103,22 @@ void dac_audio_send(const uint8_t *buf, size_t size) {
     // int16_t *src = (dac_sample_rate == SAMPLE_RATE_16KHZ) ? sinewave_16000 : sinewave_8000;
     int16_t *src = (int16_t *) buf;
     uint16_t sample;
+    // float dithered_sample;
+    // float dither = ((float)rand() / (float)RAND_MAX) - 0.5f;
     
     // TLC5615 (10bit DAC) expects the data to be formatted as follows:
     // 4 upper dummy bits, 10 data bits, 2 extra (don't care) sub-LSB bits
     for (int i = 0; i < samples_to_write; i++) {
-        sample = SPI_SWAP_DATA_TX((src[i] - INT16_MIN) >> 4, DAC_SAMPLE_BIT_SIZE);
+        // dithered_sample = src[i] * 0.6 + dither;
+        
+        // if (dithered_sample < INT16_MIN) {
+        //     dithered_sample = (float) INT16_MIN;
+        // } else if (dithered_sample > INT16_MAX) {
+        //     dithered_sample = (float) INT16_MAX;
+        // }
+        // sample = SPI_SWAP_DATA_TX(( (int16_t) (dithered_sample - INT16_MIN) ) >> 4, DAC_SAMPLE_BIT_SIZE);
+        sample = SPI_SWAP_DATA_TX(( src[i] / 2 - INT16_MIN) >> 4, DAC_SAMPLE_BIT_SIZE);
+        // sample = SPI_SWAP_DATA_TX((src[i] - INT16_MIN) >> 4, DAC_SAMPLE_BIT_SIZE);
         xQueueSend(spi_data_queue, &sample, 0);
     }
 }
