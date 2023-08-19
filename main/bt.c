@@ -359,7 +359,6 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
             if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED) {
                 ESP_LOGI(BT_TAG, "Initializing dac");
                 dac_audio_init(SAMPLE_RATE_16KHZ);
-                // dac_audio_enable(1);
                 // adc_audio_init(SAMPLE_RATE_16KHZ, bt_audio_data_available_queue);
                 // Disable discoverability after first pair
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
@@ -621,7 +620,7 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     // assert(r == pdPASS);
     // ESP_LOGI(BT_TAG, "Created audio handler task");
 
-    r = xTaskCreatePinnedToCore(bt_msg_handler, "bt_msg_handler", 4096, NULL, configMAX_PRIORITIES - 3, NULL, 1);
+    r = xTaskCreatePinnedToCore(bt_msg_handler, "bt_msg_handler", 8192, NULL, configMAX_PRIORITIES - 3, NULL, 1);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created bluetooth task");
     

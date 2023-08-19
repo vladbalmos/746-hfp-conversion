@@ -14,21 +14,30 @@
 #define DA_TAG "DA"
 #define DAC_AUDIO_16KHZ_BUFFER_SIZE 240
 #define DAC_AUDIO_8KHZ_BUFFER_SIZE 120
-#define DAC_SAMPLE_SIZE 2
+#define DAC_SAMPLE_BYTE_COUNT 2
+#define DAC_SAMPLE_BIT_SIZE DAC_SAMPLE_BYTE_COUNT * 8
+#define DAC_SPI_CLOCK_SPEED_HZ 2000000
 
-#define MISO_PIN 36
-#define MOSI_PIN 23
-#define CLK_PIN 18
-#define CS_PIN 5
-#define SPI_QUEUE_SIZE 8
+#define DAC_MOSI_PIN 23
+#define DAC_CLK_PIN 18
+#define DAC_CS_PIN 5
+#define DAC_SPI_QUEUE_SIZE 4
 
-static DMA_ATTR uint8_t *audio_out_buf[SPI_QUEUE_SIZE] = {NULL, NULL, NULL, NULL}; // buffer sent to DAC for output
+typedef struct {
+    RingbufHandle_t audio_rb;
+    QueueHandle_t spi_data_queue;
+} consumer_task_input_t;
+
+static DMA_ATTR uint8_t *audio_out_buf[DAC_SPI_QUEUE_SIZE] = {NULL, NULL, NULL, NULL}; // buffer sent to DAC for output
 static uint8_t *tmp_audio_buf = NULL; // buffer holding 8 bit down converted mSBC frames
 static uint8_t *audio_data = NULL; // data fetched from ring buffer
 static size_t tmp_audio_buf_size = 0;
+static esp_timer_handle_t spi_transfer_timer = NULL;
+static QueueHandle_t spi_data_queue = NULL;
 static TaskHandle_t audio_consumer_task;
 static RingbufHandle_t audio_out_rb = NULL;
 static sample_rate_t dac_sample_rate;
+static uint16_t sample_rate_hz;
 static uint8_t initialized = 0;
 static uint8_t enabled = 0;
 static int64_t last_incoming_buffer_us = 0;
@@ -41,13 +50,12 @@ static uint64_t too_many_spi_tx_counter = 0;
 static uint64_t no_samples_counter = 0;
 static uint64_t enabled_counter = 0;
 static uint64_t not_enough_samples_counter = 0;
-static uint64_t failed_to_queue_spi_tx_counter = 0;
+static uint64_t failed_to_send_spi_tx_counter = 0;
 
 static spi_device_handle_t spi;
 static spi_bus_config_t spi_bus_cfg;
 static spi_device_interface_config_t spi_dev_cfg;
-static uint8_t spi_tx_index = 0;
-static spi_transaction_t spi_transactions[SPI_QUEUE_SIZE];
+static spi_transaction_t spi_transaction;
 
 /**
  * Return the buffer size based on current sample rate
@@ -64,55 +72,49 @@ static inline size_t dac_audio_get_buffer_size() {
     return 0;
 }
 
-static inline uint32_t dac_sample_rate_to_spi_clock_speed(uint16_t sample_rate) {
-    double period = 1.0 / sample_rate;
-    uint32_t clock_speed =  (uint32_t) (DAC_SAMPLE_SIZE * 8  / period);
-    return clock_speed;
-}
-
 static inline size_t dac_audio_get_rb_size() {
     return 8 * dac_audio_get_buffer_size();
 }
 
-static void IRAM_ATTR post_spi_tx_callback(spi_transaction_t *tx) {
-    spi_tx_index--;
+static void spi_transfer_callback(void *arg) {
+    QueueHandle_t queue = (QueueHandle_t) arg;
+    uint16_t sample;
 
-    int64_t now = esp_timer_get_time();
-    int64_t interval = now - last_incoming_buffer_us;
-    last_incoming_buffer_us = now;
-    if (sent_buf_counter++ % 100 == 0) {
-        ESP_DRAM_LOGI(DA_TAG, "Send interval %"PRId64, interval);
+    if (xQueueReceive(queue, &sample, 0) != pdTRUE) {
+        return;
     }
-}
-
-static void send_spi_tx(const uint8_t *buf, size_t buf_size) {
-    spi_transaction_t *tx = &spi_transactions[spi_tx_index];
-    memset(tx, 0, sizeof(spi_transaction_t));
-    
-    tx->user = NULL;
-    tx->tx_buffer = buf;
-    tx->rx_buffer = NULL;
-    tx->length = buf_size * 8;
-    tx->flags = 0;
-    
-    
-    esp_err_t result = spi_device_queue_trans(spi, tx, portMAX_DELAY);
+    spi_transaction.tx_buffer = &sample;
+    // esp_err_t result = spi_device_polling_transmit(spi, &spi_transaction);
+    esp_err_t result = spi_device_queue_trans(spi, &spi_transaction, 0);
     if (result != ESP_OK) {
-        if (failed_to_queue_spi_tx_counter++ % 100 == 0) {
-            ESP_LOGE(DA_TAG, "Failed to queue spi transaction: %d", result);
+        if (failed_to_send_spi_tx_counter++ % 100 == 0) {
+            ESP_LOGE(DA_TAG, "Failed to send spi transaction: %d", result);
         }
         return;
     }
-    spi_tx_index++;
+}
+
+static void queue_spi_data(QueueHandle_t queue, const uint8_t *buf, size_t buf_size) {
+    uint16_t max = buf_size / DAC_SAMPLE_BYTE_COUNT;
+    uint16_t *src = (uint16_t *) buf;
+
+    for (int i = 0; i < max; i++) {
+        xQueueSend(queue, &src[i], portMAX_DELAY);
+    }
+    
 }
 
 static void consume_audio_task_handler(void *arg) {
-    RingbufHandle_t audio_out_rb = (RingbufHandle_t) arg;
+    // RingbufHandle_t audio_out_rb = (RingbufHandle_t) arg;
+    consumer_task_input_t *input = (consumer_task_input_t *) arg;
+    RingbufHandle_t audio_out_rb = input->audio_rb;
+    QueueHandle_t spi_data_queue = input->spi_data_queue;
 
     size_t buffered_samples_size;
     size_t dac_buf_size = dac_audio_get_buffer_size();
     size_t min_buffered_samples_size = dac_buf_size;
     size_t received_bytes = 0;
+    uint8_t out_buf_index = 0;
     uint8_t *out_buf = NULL;
 
     ESP_LOGW(DA_TAG, "DAC audio buffer size is: %d", dac_buf_size);
@@ -125,15 +127,10 @@ static void consume_audio_task_handler(void *arg) {
             continue;
         }
 
-        if (spi_tx_index == (SPI_QUEUE_SIZE - 1)) {
-            // if (too_many_spi_tx_counter++ % 250 == 0) {
-            //     ESP_LOGE(DA_TAG, "Too many queued SPI transactions");
-            // }
-            vTaskDelay(1);
-            continue;
-        }
-
-        out_buf = audio_out_buf[spi_tx_index];
+        if (out_buf_index >= DAC_SPI_QUEUE_SIZE) {
+            out_buf_index = 0;
+        } 
+        out_buf = audio_out_buf[out_buf_index];
 
         buffered_samples_size = dac_audio_get_rb_size() - xRingbufferGetCurFreeSize(audio_out_rb);
         
@@ -151,6 +148,7 @@ static void consume_audio_task_handler(void *arg) {
             }
             goto stream_silence;
         }
+        out_buf_index++;
         
 
         memcpy(out_buf, audio_data, received_bytes);
@@ -162,7 +160,7 @@ static void consume_audio_task_handler(void *arg) {
             memset(out_buf + received_bytes, 0, dac_buf_size - received_bytes);
         }
         
-        send_spi_tx(out_buf, dac_buf_size);
+        queue_spi_data(spi_data_queue, out_buf, dac_buf_size);
         
         if (enabled_counter++ % 250 == 0) {
             ESP_LOGW(DA_TAG, "Streaming data");
@@ -172,7 +170,7 @@ static void consume_audio_task_handler(void *arg) {
         
 stream_silence:
         memset(out_buf, 0, dac_buf_size);
-        send_spi_tx(out_buf, dac_buf_size);
+        queue_spi_data(spi_data_queue, out_buf, dac_buf_size);
         continue;
     }
 }
@@ -193,16 +191,16 @@ void dac_audio_send(const uint8_t *buf, size_t size) {
         samples_to_write = tmp_audio_buf_size;
     }
     
-    int16_t *src = (dac_sample_rate == SAMPLE_RATE_16KHZ) ? sinewave_16000 : sinewave_8000;
-    // int16_t *src = (int16_t *) buf;
+    // int16_t *src = (dac_sample_rate == SAMPLE_RATE_16KHZ) ? sinewave_16000 : sinewave_8000;
+    int16_t *src = (int16_t *) buf;
     uint16_t *dst = (uint16_t *) tmp_audio_buf;
     
 
     // TLC5615 (10bit DAC) expects the data to be formatted as follows:
     // 4 upper dummy bits, 10 data bits, 2 extra (don't care) sub-LSB bits
     for (int i = 0; i < samples_to_write; i++) {
-        dst[i] = ((src[i] - INT16_MIN) >> 6) << 2;
-        bytes_written += DAC_SAMPLE_SIZE;
+        dst[i] = SPI_SWAP_DATA_TX((src[i] - INT16_MIN) >> 4, DAC_SAMPLE_BIT_SIZE);
+        bytes_written += DAC_SAMPLE_BYTE_COUNT;
     }
 
     // if (debug_counter++ % 1000 == 0) {
@@ -250,10 +248,13 @@ void dac_audio_enable(uint8_t status) {
     if (status) {
         ESP_LOGW(DA_TAG, "Enabling DAC");
         enabled = 1;
+        uint64_t period = (uint64_t) 1000000 / (uint64_t) sample_rate_hz;
+        ESP_ERROR_CHECK(esp_timer_start_periodic(spi_transfer_timer, period));
         return;
     }
 
     enabled = 0;
+    ESP_ERROR_CHECK(esp_timer_stop(spi_transfer_timer));
     ESP_LOGW(DA_TAG, "Disabling dac");
 }
 
@@ -261,18 +262,24 @@ void dac_audio_init(sample_rate_t sample_rate) {
     if (initialized) {
         return;
     }
+    
+    memset(&spi_transaction, 0, sizeof(spi_transaction_t));
+    
+    // Pre-fill non-volatile tx fields
+    spi_transaction.user = NULL;
+    spi_transaction.rx_buffer = NULL;
+    spi_transaction.length = DAC_SAMPLE_BIT_SIZE;
 
     assert(sample_rate != SAMPLE_RATE_NONE);
     dac_sample_rate = sample_rate;
 
     size_t buf_size = dac_audio_get_buffer_size();
-    uint16_t sample_rate_hz = (sample_rate == SAMPLE_RATE_16KHZ) ? 16000 : 8000;
-    uint32_t spi_clock_speed_hz = dac_sample_rate_to_spi_clock_speed(sample_rate_hz);
-    ESP_LOGI(DA_TAG, "Initializing DAC. Sample rate: %d. Buffer size: %d. SPI clock speed: %"PRId32"hz", sample_rate_hz, buf_size, spi_clock_speed_hz);
+    sample_rate_hz = (sample_rate == SAMPLE_RATE_16KHZ) ? 16000 : 8000;
+    ESP_LOGI(DA_TAG, "Initializing DAC. Sample rate: %d. Buffer size: %d", sample_rate_hz, buf_size);
 
     // Setup buffers
-    for (uint8_t i = 0; i < SPI_QUEUE_SIZE; i++) {
-        audio_out_buf[i] = malloc(SPI_QUEUE_SIZE * buf_size);
+    for (uint8_t i = 0; i < DAC_SPI_QUEUE_SIZE; i++) {
+        audio_out_buf[i] = malloc(DAC_SPI_QUEUE_SIZE * buf_size);
         assert(audio_out_buf[i] != NULL);
     }
 
@@ -283,29 +290,42 @@ void dac_audio_init(sample_rate_t sample_rate) {
     audio_out_rb = xRingbufferCreate(dac_audio_get_rb_size(), RINGBUF_TYPE_BYTEBUF);
     assert(audio_out_rb != NULL);
 
-    BaseType_t r = xTaskCreatePinnedToCore(consume_audio_task_handler, "consume_audio", 2048, audio_out_rb, 15, &audio_consumer_task, 1);
+    spi_data_queue = xQueueCreate(DAC_SPI_QUEUE_SIZE * buf_size, sizeof(uint16_t));
+    assert(spi_data_queue != NULL);
+    
+    consumer_task_input_t input = {
+        .audio_rb = audio_out_rb,
+        .spi_data_queue = spi_data_queue
+    };
+
+    BaseType_t r = xTaskCreatePinnedToCore(consume_audio_task_handler, "consume_audio", 2048, &input, 15, &audio_consumer_task, 1);
     assert(r == pdPASS);
+    
+    const esp_timer_create_args_t transfer_timer_args = {
+        .callback = &spi_transfer_callback,
+        .arg = spi_data_queue,
+        .name = 'spi-transfer'
+    };
+    ESP_ERROR_CHECK(esp_timer_create(&transfer_timer_args, &spi_transfer_timer));
 
     // Setup bus
     spi_bus_cfg.miso_io_num = -1; // we're not interested in reading
-    spi_bus_cfg.mosi_io_num = MOSI_PIN;
-    spi_bus_cfg.sclk_io_num = CLK_PIN;
+    spi_bus_cfg.mosi_io_num = DAC_MOSI_PIN;
+    spi_bus_cfg.sclk_io_num = DAC_CLK_PIN;
     spi_bus_cfg.quadwp_io_num = -1;
     spi_bus_cfg.quadhd_io_num = -1;
-    spi_bus_cfg.max_transfer_sz = buf_size;
+    // spi_bus_cfg.max_transfer_sz = buf_size;
 
     // Setup device
-    spi_dev_cfg.clock_speed_hz = spi_clock_speed_hz;
-    // spi_dev_cfg.clock_speed_hz = 8000;
+    spi_dev_cfg.clock_speed_hz = DAC_SPI_CLOCK_SPEED_HZ;
     spi_dev_cfg.mode = 0;
     spi_dev_cfg.command_bits = 0;
     spi_dev_cfg.address_bits = 0;
     spi_dev_cfg.dummy_bits = 0;
-    spi_dev_cfg.spics_io_num = CS_PIN;
-    spi_dev_cfg.queue_size = SPI_QUEUE_SIZE;
-    spi_dev_cfg.post_cb = &post_spi_tx_callback;
+    spi_dev_cfg.spics_io_num = DAC_CS_PIN;
+    spi_dev_cfg.queue_size = DAC_SPI_QUEUE_SIZE;
     
-    ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, 0));
     ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &spi_dev_cfg, &spi));
     ESP_ERROR_CHECK(spi_device_acquire_bus(spi, portMAX_DELAY));
 
@@ -331,18 +351,22 @@ void dac_audio_deinit() {
     ESP_LOGW(DA_TAG, "Releasing channels");
     dac_sample_rate = SAMPLE_RATE_NONE;
     
+    ESP_ERROR_CHECK(esp_timer_delete(spi_transfer_timer));
+    
     spi_device_release_bus(spi);
     ESP_ERROR_CHECK(spi_bus_remove_device(spi));
     ESP_ERROR_CHECK(spi_bus_free(HSPI_HOST));
 
     ESP_LOGW(DA_TAG, "Deleting task");
     vTaskDelete(audio_consumer_task);
-
+    
     vRingbufferDelete(audio_out_rb);
     audio_out_rb = NULL;
+    
+    vQueueDelete(spi_data_queue);
 
     ESP_LOGW(DA_TAG, "Freeing audio buf");
-    for (uint8_t i = 0; i < SPI_QUEUE_SIZE; i++) {
+    for (uint8_t i = 0; i < DAC_SPI_QUEUE_SIZE; i++) {
         free(audio_out_buf[i]);
         audio_out_buf[i] = NULL;
     }

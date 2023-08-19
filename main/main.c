@@ -4,173 +4,163 @@
 #include <inttypes.h>
 #include "driver/spi_master.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/ringbuf.h"
 #include "freertos/task.h"
-#include "esp_timer.h"
+#include "freertos/queue.h"
+#include "driver/gpio.h"
+#include "driver/dac_continuous.h"
+#include "esp_bt.h"
+#include "esp_bt_main.h"
+#include "nvs.h"
+#include "nvs_flash.h"
 #include "esp_log.h"
-#include "sample_rate.h"
-#include "sine_8000_666.h"
+#include "bt.h"
+#include "dialer.h"
+#include "ringer.h"
 
 #define TAG "MAIN"
-#define DA_TAG "MAIN"
-#define MISO_PIN 36
-#define MOSI_PIN 23
-#define CLK_PIN 18
-#define CS_PIN 5
-#define SPI_QUEUE_SIZE 240
 
-#define BUF_SIZE 120
+#define ESP_INTR_FLAG_DEFAULT 0
+#define DIALER_PULSE_PIN 15
+#define HOOK_POWER_PIN 4
+#define HOOK_SWITCH_PIN 2
+#define RINGER_SIGNAL_PIN 16
+#define RINGER_ENABLE_PIN 17
 
-uint16_t DMA_ATTR dac_samples[60];
-static int last_tx_index = 0;
-static int64_t last_incoming_buffer_us = 0;
+static uint8_t incoming_call_alert = 0;
+static uint8_t call_in_progress = 0;
 
-static uint64_t sent_buf_counter = 0;
-static uint64_t too_many_spi_tx_counter = 0;
-static uint64_t failed_to_queue_spi_tx_counter = 0;
-
-static spi_device_handle_t spi;
-static spi_bus_config_t spi_bus_cfg;
-static spi_device_interface_config_t spi_dev_cfg;
-static spi_transaction_t spi_transactions[SPI_QUEUE_SIZE];
-
-static void IRAM_ATTR post_spi_tx_callback(spi_transaction_t *tx) {
-    int64_t now = esp_timer_get_time();
-    int64_t interval = now - last_incoming_buffer_us;
-    last_incoming_buffer_us = now;
-    if (sent_buf_counter++ % 100 == 0) {
-        ESP_DRAM_LOGI(DA_TAG, "Send interval %"PRId64, interval);
-    }
-}
-
-static void send_spi_tx_single(const uint8_t *buf, size_t buf_size) {
-    if (last_tx_index >= 120) {
-        last_tx_index = 0;
+void on_headset_state_change(uint8_t state) {
+    ESP_LOGI(TAG, "Headset state change: %d", state);
+    
+    if (state && incoming_call_alert) {
+        bt_task_send(BT_EV_ANSWER_CALL, NULL, 0);
+        ringer_enable(0);
+        return;
     }
     
-    // ESP_LOGW(DA_TAG, "%d %d", last_tx_index, *(buf + last_tx_index));
-
-    spi_transaction_t *tx = &spi_transactions[last_tx_index];
-    memset(tx, 0, sizeof(spi_transaction_t));
-    
-    
-    tx->user = NULL;
-    tx->tx_buffer = buf + last_tx_index;
-    tx->rx_buffer = NULL;
-    tx->length = 16;
-    
-    last_tx_index += 2;
-
-    // esp_err_t result = spi_device_queue_trans(spi, tx, portMAX_DELAY);
-    esp_err_t result = spi_device_polling_transmit(spi, tx);
-    if (result != ESP_OK) {
-        if (failed_to_queue_spi_tx_counter++ % 100 == 0) {
-            ESP_LOGE(DA_TAG, "Failed to queue spi transaction: %d", result);
-        }
+    if (!state && call_in_progress) {
+        bt_task_send(BT_EV_CALL_HANGUP, NULL, 0);
         return;
     }
 }
 
-static void send_spi_tx(const uint8_t *buf, size_t buf_size) {
-    int start_index = last_tx_index;
-    int stop_index = start_index + (buf_size / 2);
-
-    for (int i = start_index; i < stop_index ; i++) {
-        spi_transaction_t *tx = &spi_transactions[i];
-        memset(tx, 0, sizeof(spi_transaction_t));
-        
-        tx->user = NULL;
-        tx->tx_buffer = buf;
-        tx->rx_buffer = NULL;
-        tx->length = 16;
-        
-        buf += 2;
-        
-        esp_err_t result = spi_device_queue_trans(spi, tx, portMAX_DELAY);
-        // esp_err_t result = spi_device_polling_transmit(spi, tx);
-        if (result != ESP_OK) {
-            if (failed_to_queue_spi_tx_counter++ % 100 == 0) {
-                ESP_LOGE(DA_TAG, "Failed to queue spi transaction: %d", result);
-            }
-            return;
-        }
-        
-    }
-    last_tx_index = stop_index;
-    
-    // Wait for half of the transactions to be finished
-    if (last_tx_index >= SPI_QUEUE_SIZE) {
-        last_tx_index = 0;
-        // spi_transaction_t *rtrans;
-        // for (int i = 0; i < (SPI_QUEUE_SIZE / 2); i++) {
-        //     spi_device_get_trans_result(spi, &rtrans, portMAX_DELAY);
-        // }
-        // last_tx_index = 0;
-    }
+void on_start_dialing() {
+    ESP_LOGI(TAG, "Started dialing");
 }
 
-static void t_callback(void *arg) {
-    send_spi_tx_single(dac_samples, BUF_SIZE);
+void on_digit(uint8_t digit) {
+    ESP_LOGI(TAG, "Dialed digit: %d", digit);
+}
+
+void on_end_dialing(const char *number, uint8_t number_length) {
+    ESP_LOGI(TAG, "End dialing");
+    if (!number_length) {
+        return;
+    }
+    
+    if (dialer_get_headset_state()) {
+        bt_task_send(BT_EV_DIAL_NUMBER, (void *) number, (size_t) number_length);
+        ESP_LOGI(TAG, "Dialing number: %s. Number length: %d", number, number_length);
+    }
 }
 
 void app_main(void) {
-    // Setup bus
-    spi_bus_cfg.miso_io_num = -1; // we're not interested in reading
-    spi_bus_cfg.mosi_io_num = MOSI_PIN;
-    spi_bus_cfg.sclk_io_num = CLK_PIN;
-    spi_bus_cfg.quadwp_io_num = -1;
-    spi_bus_cfg.quadhd_io_num = -1;
-    spi_bus_cfg.max_transfer_sz = BUF_SIZE;
-
-    // Setup device
-    spi_dev_cfg.clock_speed_hz = 2000000;
-    // spi_dev_cfg.clock_speed_hz = 288000;
-    spi_dev_cfg.command_bits = 0;
-    spi_dev_cfg.address_bits = 0;
-    spi_dev_cfg.dummy_bits = 0;
-    spi_dev_cfg.spics_io_num = CS_PIN;
-    spi_dev_cfg.queue_size = SPI_QUEUE_SIZE;
-    spi_dev_cfg.mode = 0;
-    // spi_dev_cfg.flags = SPI_DEVICE_NO_RETURN_RESULT;
-
-    // spi_dev_cfg.post_cb = &post_spi_tx_callback;
-
-    // ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
-    ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, 0));
-    ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &spi_dev_cfg, &spi));
-    ESP_ERROR_CHECK(spi_device_acquire_bus(spi, portMAX_DELAY));
-
-    int freq_khz;
-    size_t max_tx_length;
-
-    ESP_ERROR_CHECK(spi_device_get_actual_freq(spi, &freq_khz));
-    ESP_LOGI(DA_TAG, "Actual SPI transfer frequency %dKHZ", freq_khz);
-
-    ESP_ERROR_CHECK(spi_bus_get_max_transaction_len(HSPI_HOST, &max_tx_length));
-    ESP_LOGI(DA_TAG, "Max SPI transaction length: %d bytes", max_tx_length);
+    // Initialize phone interface
+    ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT));
     
+    dialer_init(DIALER_PULSE_PIN, HOOK_POWER_PIN, HOOK_SWITCH_PIN, on_headset_state_change, on_start_dialing, on_digit, on_end_dialing);
+    dialer_enable(1);
     
+    ringer_init(RINGER_ENABLE_PIN, RINGER_SIGNAL_PIN);
+    ESP_LOGI(TAG, "Headset state is %d", dialer_get_headset_state());
+
     
-    for (int i = 0; i < 60; i++) {
-        dac_samples[i] = SPI_SWAP_DATA_TX((sinewave_8000[i] - INT16_MIN) >> 4, 16);
+    // Bluetooth initialization
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK( ret );
+
+    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
+    
+    esp_err_t err;
+    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+    if ((err = esp_bt_controller_init(&bt_cfg)) != ESP_OK) {
+        ESP_LOGE(TAG, "%s initialize controller failed: %s\n", __func__, esp_err_to_name(ret));
+        return;
     }
 
-    static esp_timer_handle_t t;
+    if ((err = esp_bt_controller_enable(ESP_BT_MODE_CLASSIC_BT)) != ESP_OK) {
+        ESP_LOGE(TAG, "%s enable controller failed: %s\n", __func__, esp_err_to_name(ret));
+        return;
+    }
 
-    const esp_timer_create_args_t t_args = {
-        .callback = &t_callback,
-        .name = "sample-timer"
-    };
+    if ((err = esp_bluedroid_init()) != ESP_OK) {
+        ESP_LOGE(TAG, "%s initialize bluedroid failed: %s\n", __func__, esp_err_to_name(ret));
+        return;
+    }
+
+    if ((err = esp_bluedroid_enable()) != ESP_OK) {
+        ESP_LOGE(TAG, "%s enable bluedroid failed: %s\n", __func__, esp_err_to_name(ret));
+        return;
+    }
     
-    ESP_ERROR_CHECK(esp_timer_create(&t_args, &t));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(t, 125));
+    QueueHandle_t bt_msg_queue = xQueueCreate(10, sizeof(bt_msg_t));
+    assert(bt_msg_queue != NULL);
 
-    while (1) {
-        vTaskDelay(10);
-        // if (spi_tx_index == (SPI_QUEUE_SIZE - 1)) {
-        //     continue;
-        // }
-        
-        // send_spi_tx(dac_samples, BUF_SIZE);
+    bt_init(bt_msg_queue);
+    
+    bt_msg_t msg;
+    
+    ESP_LOGI(TAG, "10 ms = %"PRId32" tick", pdMS_TO_TICKS(10));
+
+    while(1) {
+        if (xQueueReceive(bt_msg_queue, &msg, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+
+        switch (msg.ev) {
+            case BT_EV_INCOMING_CALL: {
+                if (!dialer_get_headset_state()) {
+                    incoming_call_alert = 1;
+                    if (!ringer_get_state()) {
+                        ringer_enable(1);
+                    }
+                } else {
+                    bt_task_send(BT_EV_CALL_HANGUP, NULL, 0);
+                }
+                ESP_LOGI(TAG, "Incoming call");
+                break;
+            }
+
+            case BT_EV_CALL_STATUS_IDLE: {
+                if (ringer_get_state()) {
+                    ringer_enable(0);
+                }
+                ESP_LOGI(TAG, "Call canceled");
+                incoming_call_alert = 0;
+                break;
+            }
+
+            case BT_EV_CALL_IN_PROGRESS: {
+                incoming_call_alert = 0;
+                call_in_progress = 1;
+                ESP_LOGI(TAG, "Call in progress");
+                break;
+            }
+
+            case BT_EV_CALL_HANGUP: {
+                call_in_progress = 0;
+                ESP_LOGI(TAG, "Call hangup");
+                break;
+            }
+                                   
+            default: {
+                ESP_LOGW(TAG, "Unhandled message %d", msg.ev);
+                break;
+            }
+        }
     }
 }
