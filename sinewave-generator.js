@@ -7,7 +7,7 @@ const fs = require('fs');
 const SAMPLE_RATE = process.env['SAMPLE_RATE'] || 16000;
 const MAX_SAMPLES = process.env['MAX_SAMPLES'] || 120;
 const CYCLES = process.env['CYCLES'] || 5
-const AMPLITUDE = 32767;  // for 16-bit PCM
+const AMPLITUDE = 15000;  // for 16-bit PCM
 
 function computeFrequency(sampleCount) {
     const period = sampleCount / SAMPLE_RATE;
