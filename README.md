@@ -18,7 +18,7 @@ Firmware and hardware related resources to add hands-free bluetooth support to a
 
 ## Audio input/output
 
-In a nutshell, the ESP32 is configured with `SCO data path = HCI`, this enables the improved mSBC codec; the audio out is sent to an external 10bit DAC; audio in is sampled through the Pico's 12bit ADC.
+In a nutshell, the ESP32 is configured with `SCO data path = HCI`, this enables the improved mSBC codec on some AGs; the audio out is sent to an external 10bit DAC; audio in is sampled through the Pico's 12bit ADC.
 
 This is more complicated than it should mostly due to my lack of experience with the ESP32 and lack of a propper external ADC.  
 My initial plan was to use the ESP32's ADC & DAC simultaneous, but the I've run into the following problems:
