@@ -13,15 +13,15 @@ add_compile_options(-Wall
         -Wno-maybe-uninitialized
         )
 
-add_executable(adc
-    adc.c
+add_executable(adc_main
+    adc_main.c
 )
 
-pico_enable_stdio_usb(adc 0)
-pico_enable_stdio_uart(adc 1)
+pico_enable_stdio_usb(adc_main 0)
+pico_enable_stdio_uart(adc_main 1)
 
 # pull in common dependencies
-target_link_libraries(adc
+target_link_libraries(adc_main
     pico_stdlib
     pico_malloc
     hardware_adc
@@ -31,9 +31,9 @@ target_link_libraries(adc
     )
 
 if(DEFINED ENV{DEBUG_MODE})
-    target_compile_definitions(adc PUBLIC
+    target_compile_definitions(adc_main PUBLIC
         DEBUG_MODE
     )
 endif()
 
-pico_add_extra_outputs(adc)
+pico_add_extra_outputs(adc_main)
