@@ -14,6 +14,7 @@ add_compile_options(-Wall
         )
 
 add_executable(adc_main
+    adc.c
     adc_main.c
 )
 
