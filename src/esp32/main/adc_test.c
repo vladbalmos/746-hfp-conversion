@@ -17,6 +17,8 @@
 #define ADC_CS_PIN 14
 #define ADC_SPI_QUEUE_SIZE 4
 
+#define MAX 3
+
 static spi_device_handle_t spi;
 static spi_bus_config_t spi_bus_cfg;
 static spi_device_interface_config_t spi_dev_cfg;
@@ -64,22 +66,17 @@ void app_main(void) {
     ESP_ERROR_CHECK(spi_bus_get_max_transaction_len(HSPI_HOST, &max_tx_length));
     ESP_LOGI(TAG, "Max SPI transaction length: %d bytes", max_tx_length);
     
-    uint8_t last_enable_state = 0;
-    while (1) {
-        last_enable_state = !last_enable_state;
-        gpio_set_level(ENABLE_PIN, last_enable_state);
-        ESP_LOGI(TAG, "Running. New state: %d", last_enable_state);
-        uint16_t data = SPI_SWAP_DATA_TX((uint16_t) SAMPLE_RATE_8KHZ, 16);
+    gpio_set_level(ENABLE_PIN, 1);
+    uint16_t data = SPI_SWAP_DATA_TX((uint16_t) SAMPLE_RATE_16KHZ, 16);
 
-        
-        if (last_enable_state) {
-            spi_transaction.user = NULL;
-            spi_transaction.rx_buffer = NULL;
-            spi_transaction.tx_buffer = &data;
-            spi_transaction.length = 16;
-            ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &spi_transaction));
-        }
-        
+    spi_transaction.user = NULL;
+    spi_transaction.rx_buffer = NULL;
+    spi_transaction.tx_buffer = &data;
+    spi_transaction.length = 16;
+    ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &spi_transaction));
+
+
+    while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
