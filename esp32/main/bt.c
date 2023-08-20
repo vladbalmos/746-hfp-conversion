@@ -1,5 +1,3 @@
-#define INCLUDE_vTaskSuspend 1
-
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -15,7 +13,7 @@
 #include "esp_hf_client_api.h"
 #include "esp_log.h"
 #include "adc_audio.h"
-#include "spi_dac_audio.h"
+#include "dac_audio.h"
 #include "bt.h"
 
 
