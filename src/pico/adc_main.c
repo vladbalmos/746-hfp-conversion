@@ -62,6 +62,7 @@ int main() {
         if (adc_enabled && !adc_initialized) {
             adc_initialize();
             adc_initialized = true;
+            adc_start_streaming();
             continue;
         }
         
