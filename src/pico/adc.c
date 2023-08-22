@@ -36,6 +36,8 @@ static uint64_t sent_adc_counter = 0;
 static uint64_t sent_spi_counter = 0;
 static int16_t *adc_samples = NULL;
 int16_t *sinewave_buf = NULL;
+static absolute_time_t start;
+static int64_t duration = 0;
 
 static int spi_read(uint16_t *dst, size_t len) {
     size_t read_count = 0;
@@ -66,9 +68,11 @@ void print_binary(unsigned int number) {
 }
 
 void adc_dma_isr() {
+    duration = absolute_time_diff_us(start, get_absolute_time());
+    
     dma_hw->ints0 = 1u << adc_dma_chan;
     if (sent_adc_counter++ % 500 == 0) {
-        printf("ADC Data transfered\n");
+        printf("ADC Data transfered: %lld\n", duration);
         for (int i = 0; i < 120; i++) {
             printf("%d ", adc_samples[i]);
             if (i && i % 8 == 0) {
@@ -87,6 +91,7 @@ void spi_dma_isr() {
     if (sent_spi_counter++ % 500 == 0) {
         printf("SPI data transfered\n");
     }
+    start = get_absolute_time();
     dma_channel_set_read_addr(adc_dma_chan, sinewave_buf, false);
     dma_channel_set_write_addr(adc_dma_chan, adc_samples, true);
 }

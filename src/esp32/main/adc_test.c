@@ -33,7 +33,9 @@ static uint8_t adc_configured = 0;
 static uint64_t spi_read_tx_counter = 0;
 static uint64_t spi_cb_counter = 0;
 static int64_t start;
-static int64_t duration;
+static IRAM_ATTR int64_t duration;
+static IRAM_ATTR int64_t transmission_interval;
+static IRAM_ATTR int64_t last_transmission = 0;
 
 static void IRAM_ATTR data_read_isr(void* arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
@@ -49,7 +51,10 @@ static void IRAM_ATTR on_spi_data_isr(spi_transaction_t *tx) {
     buf[sample_index] = sample;
     
     if (sample_index == (ADC_SAMPLES_COUNT - 1)) {
-        duration = esp_timer_get_time() - start;
+        int64_t now = esp_timer_get_time();
+        duration = now - start;
+        transmission_interval = now - last_transmission;
+        last_transmission = now;
         xQueueSendFromISR(buf_ready_queue, &dummy, NULL);
     }
     // if (spi_cb_counter++ % 9600 == 0) {
@@ -181,6 +186,7 @@ void app_main(void) {
         
         if (print_counter++ % 10 == 0) {
             ESP_LOGW(TAG, "Duration is %"PRId64, duration);
+            ESP_LOGW(TAG, "Transmission interval %"PRId64, transmission_interval);
             for (int i = 0; i < ADC_SAMPLES_COUNT; i++) {
                 printf("%d ", buf[i]);
                 
