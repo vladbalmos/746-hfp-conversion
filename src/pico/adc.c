@@ -145,12 +145,13 @@ void adc_initialize() {
     // Configure ADC DMA channel
     adc_dma_chan = dma_claim_unused_channel(true);
     assert(adc_dma_chan != -1);
+    dma_timer_claim(ADC_DMA_TIMER);
     
     dma_channel_config cfg = dma_channel_get_default_config(adc_dma_chan);
     channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
     channel_config_set_read_increment(&cfg, true);
     channel_config_set_write_increment(&cfg, true);
-    dma_timer_claim(ADC_DMA_TIMER);
+    channel_config_set_dreq(&cfg, dma_get_timer_dreq(ADC_DMA_TIMER));
 
     // TODO: replace this with DREQ_DMA once ADC is actually configured
     uint16_t dma_timer_num;
