@@ -184,7 +184,7 @@ void app_main(void) {
             continue;
         }
         
-        if (print_counter++ % 10 == 0) {
+        if (print_counter++ % 250 == 0) {
             ESP_LOGW(TAG, "Duration is %"PRId64, duration);
             ESP_LOGW(TAG, "Transmission interval %"PRId64, transmission_interval);
             for (int i = 0; i < ADC_SAMPLES_COUNT; i++) {
