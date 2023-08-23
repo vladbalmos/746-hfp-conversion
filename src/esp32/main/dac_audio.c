@@ -158,7 +158,7 @@ void dac_audio_init(sample_rate_t sample_rate) {
     spi_data_queue = xQueueCreate(DAC_SPI_QUEUE_SIZE * buf_size, sizeof(uint16_t));
     assert(spi_data_queue != NULL);
     
-    BaseType_t r = xTaskCreatePinnedToCore(consume_audio_task_handler, "consume_audio", 2048, spi_data_queue, 15, &audio_consumer_task, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(consume_audio_task_handler, "consume_audio", 2048, spi_data_queue, 20, &audio_consumer_task, 1);
     assert(r == pdPASS);
 
     gptimer_config_t timer_config = {

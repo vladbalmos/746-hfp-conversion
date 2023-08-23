@@ -224,7 +224,7 @@ void dialer_init(gpio_num_t pin,
     dialer_on_end = end_callback;
     headset_state = gpio_get_level(hook_switch_pin);
     
-    BaseType_t result =  xTaskCreatePinnedToCore(process_irq_events, "dial_proc_irq_ev", 2048, NULL, 10, NULL, 1);
+    BaseType_t result =  xTaskCreatePinnedToCore(process_irq_events, "dial_proc_irq_ev", 2048, NULL, 10, NULL, 0);
     assert(result == pdPASS);
 }
 

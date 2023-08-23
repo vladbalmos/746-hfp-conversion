@@ -177,8 +177,6 @@ const char *c_inband_ring_state_str[] = {
 
 static void bt_signal_audio_ready_handler(void *arg) {
     uint8_t _;
-    uint8_t buf[240] = {0};
-    uint8_t notified = 0;
 
     while (1) {
         if (xQueueReceive(bt_audio_data_available_queue, &_, (TickType_t)portMAX_DELAY) != pdTRUE) {
@@ -226,7 +224,7 @@ static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
     // size_t item_size = sz;
     // memset(p_buf, 0, sz);
     
-    // adc_audio_receive(p_buf, &item_size, sz);
+    adc_audio_receive(p_buf, &item_size, sz);
     uint32_t ret = (item_size == sz) ? sz : 0;
 
     if (send_buf_count++ % 100 == 0) {
@@ -611,14 +609,16 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     bt_msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
     assert(bt_msg_queue != NULL);
     
-    // bt_audio_data_available_queue = xQueueCreate(8, sizeof(uint8_t));
-    // assert(bt_audio_data_available_queue != NULL);
+    adc_audio_init_transport();
+    
+    bt_audio_data_available_queue = xQueueCreate(8, sizeof(uint8_t));
+    assert(bt_audio_data_available_queue != NULL);
 
-    // r = xTaskCreatePinnedToCore(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 4096, NULL, 15, NULL, 1);
-    // assert(r == pdPASS);
-    // ESP_LOGI(BT_TAG, "Created audio handler task");
+    r = xTaskCreatePinnedToCore(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 4096, NULL, 15, NULL, 0);
+    assert(r == pdPASS);
+    ESP_LOGI(BT_TAG, "Created audio handler task");
 
-    r = xTaskCreatePinnedToCore(bt_msg_handler, "bt_msg_handler", 8192, NULL, configMAX_PRIORITIES - 3, NULL, 1);
+    r = xTaskCreatePinnedToCore(bt_msg_handler, "bt_msg_handler", 8192, NULL, configMAX_PRIORITIES - 3, NULL, 0);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created bluetooth task");
     

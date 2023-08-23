@@ -4,42 +4,103 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "freertos/ringbuf.h"
-#include "driver/gptimer.h"
-#include "esp_adc/adc_oneshot.h"
+#include "driver/spi_master.h"
+#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "adc_audio.h"
 
 #define AD_TAG "AD"
 
-#define ADC_READ_TIMEOUT_MS 20
-#define ADC_MIDPOINT (2 << 10) - 1
-#define ADC_SAMPLE_SIZE 2
+#define ADC_ENABLE_PIN GPIO_NUM_13
+#define ADC_DATA_READY_PIN GPIO_NUM_25
+#define ADC_MOSI_PIN GPIO_NUM_26
+#define ADC_MISO_PIN GPIO_NUM_27
+#define ADC_CLK_PIN GPIO_NUM_12
+#define ADC_CS_PIN GPIO_NUM_14
+#define ADC_SPI_QUEUE_SIZE 4 * 120
+#define ADC_SPI_CLOCK_SPEED_HZ 2500000
 
-#define ADC_MAX_STORE_BUF_SIZE 1024
 #define ADC_16KHZ_SAMPLES_NUM 240
 #define ADC_8KHZ_SAMPLES_NUM 120
 
+static spi_device_handle_t spi;
+static spi_bus_config_t spi_bus_cfg;
+static spi_device_interface_config_t spi_dev_cfg;
+static spi_transaction_t adc_config_spi_tx;
+static spi_transaction_t adc_data_tx[ADC_SPI_QUEUE_SIZE];
+
+static QueueHandle_t audio_ready_queue = NULL;
+static uint8_t adc_configured = 0;
+
+
 static uint8_t *audio_in_buf = NULL; // buffer holding ADC data
 static sample_rate_t adc_sample_rate;
-static gptimer_handle_t adc_read_timer = NULL;
-static adc_oneshot_unit_handle_t adc_handle = NULL;
-static QueueHandle_t adc_read_notif_queue = NULL;
+static size_t adc_buf_sample_count = 0;
 static RingbufHandle_t audio_in_rb = NULL;
-static TaskHandle_t audio_provider_task;
-static audio_provider_task_input_t audio_provider_task_input;
-static esp_timer_handle_t spi_transfer_timer;
 static uint8_t initialized = 0;
 static uint8_t enabled = 0;
-static int64_t last_incoming_sample_us = 0;
-static uint8_t dummy1 = 0;
-static uint8_t dummy2 = 0;
 
-static uint64_t adc_not_enabled_counter = 0;
-static uint64_t adc_timeout_counter = 0;
-static uint64_t adc_invalid_counter = 0;
-static uint64_t adc_read_ok_counter = 0;
-static uint64_t adc_stats_counter = 0;
+static int64_t transmission_interval_us = 0;
+static int64_t last_transmission_us = 0;
+static int64_t now_us = 0;
+static int64_t start_us = 0;
+static int64_t duration_us = 0;
+
+static uint8_t signal_flag1 = 1;
+static uint8_t signal_flag2 = 1;
+
+static void IRAM_ATTR adc_data_available_isr(void* arg) {
+    QueueHandle_t q = (QueueHandle_t) arg;
+
+    now_us = esp_timer_get_time();
+    transmission_interval_us = now_us - last_transmission_us;
+    last_transmission_us = now_us;
+    xQueueSendFromISR(q, &signal_flag1, NULL);
+}
+
+static void adc_read_spi_data_task_handler(void *arg) {
+    QueueHandle_t q = (QueueHandle_t) arg;
+    int8_t notif_counter = 0;
+    
+    while (1) {
+        if (xQueueReceive(q, &signal_flag2, (TickType_t)portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        
+        if (!adc_configured) {
+            uint16_t data = SPI_SWAP_DATA_TX((uint16_t) adc_sample_rate, 16);
+        
+            adc_config_spi_tx.user = NULL;
+            adc_config_spi_tx.rx_buffer = NULL;
+            adc_config_spi_tx.tx_buffer = &data;
+            adc_config_spi_tx.length = 16;
+            ESP_ERROR_CHECK(spi_device_transmit(spi, &adc_config_spi_tx));
+            adc_configured = 1;
+
+            ESP_LOGI(AD_TAG, "Configured ADC");
+            continue;
+        }
+        
+        start_us = esp_timer_get_time();
+        int16_t *buf = (int16_t *) audio_in_buf;
+        for (uint8_t i = 0; i < adc_buf_sample_count; i++) {
+            ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &adc_data_tx[i]));
+            int16_t sample = SPI_SWAP_DATA_RX(*(uint32_t *)adc_data_tx[i].rx_data, 16);
+            buf[i] = sample;
+            
+        }
+        now_us = esp_timer_get_time();
+        duration_us = now_us - start_us;
+        xRingbufferSend(audio_in_rb, audio_in_buf, adc_buf_sample_count * sizeof(int16_t), 0);
+        
+        if (notif_counter++ > 0) {
+            xQueueSend(audio_ready_queue, &signal_flag2, 0);
+            notif_counter = 0;
+        }
+
+    }
+}
 
 static inline size_t adc_audio_get_buffer_size() {
     if (adc_sample_rate == SAMPLE_RATE_16KHZ) {
@@ -51,100 +112,9 @@ static inline size_t adc_audio_get_buffer_size() {
     return 0;
 }
 
-static inline uint64_t adc_read_get_period() {
-    assert(adc_sample_rate != SAMPLE_RATE_NONE);
-    
-    if (adc_sample_rate == SAMPLE_RATE_16KHZ) {
-        return 62;
-    }
-    
-    return 125;
-}
-
-
 static inline size_t adc_audio_get_rb_size() {
     return 4 * adc_audio_get_buffer_size();
 }
-
-static void provide_audio_task_handler(void *arg) {
-    audio_provider_task_input_t *task_input = (audio_provider_task_input_t *) arg;
-    RingbufHandle_t audio_in_rb = task_input->rb;
-    QueueHandle_t notif_queue = task_input->adc_read_notif_queue;
-    QueueHandle_t audio_available_queue = task_input->audio_available_notif_queue;
-    esp_err_t adc_read_result;
-    
-    int raw_sample;
-    int16_t pcm_sample;
-    size_t buf_size = adc_audio_get_buffer_size();
-    uint16_t read_bytes = 0;
-
-    uint16_t stats_period = 1000000 / adc_read_get_period();
-    
-    while (1) {
-        if (!enabled) {
-            if (adc_not_enabled_counter++ % stats_period == 0) {
-                ESP_LOGW(AD_TAG, "Not enabled");
-            }
-            vTaskDelay(1);
-            continue;
-        }
-        
-        if (xQueueReceive(notif_queue, &dummy2, (TickType_t)portMAX_DELAY) != pdTRUE) {
-            // if (adc_not_enabled_counter++ % stats_period == 0) {
-                ESP_LOGW(AD_TAG, "Not receiving");
-            // }
-            continue;
-        }
-
-
-        int64_t start_read = esp_timer_get_time();
-        adc_read_result = adc_oneshot_read(adc_handle, ADC_CHANNEL_0, &raw_sample);
-        
-        if (adc_read_result != ESP_OK) {
-            if (adc_read_result == ESP_ERR_TIMEOUT) {
-                // if (adc_timeout_counter++ % stats_period == 0) {
-                    ESP_LOGW(AD_TAG, "Read timeout");
-                // }
-            } else if (adc_read_result == ESP_ERR_INVALID_ARG) {
-                // if (adc_invalid_counter++ % stats_period == 0) {
-                    ESP_LOGW(AD_TAG, "Read invalid");
-                // }
-            }
-            continue;
-        }
-        
-        pcm_sample = raw_sample - ADC_MIDPOINT;
-        audio_in_buf[read_bytes] = pcm_sample;
-        
-        if (read_bytes >= buf_size) {
-            int64_t now = esp_timer_get_time();
-            int64_t interval = now - last_incoming_sample_us;
-            last_incoming_sample_us = now;
-        
-            xRingbufferSend(audio_in_rb, audio_in_buf, read_bytes, 0);
-            xQueueSend(audio_available_queue, &dummy1, 0);
-            int64_t read_duration = esp_timer_get_time() - start_read;
-
-            if (adc_stats_counter++ % 250 == 0) {
-                ESP_LOGI(AD_TAG, "Last sample (us) %"PRId64" ADC read duration: %"PRId64". Read bytes: %d. Buf size: %d", interval, read_duration, read_bytes, buf_size);
-            }
-            read_bytes = 0;
-        } else {
-            read_bytes += ADC_SAMPLE_SIZE;
-        }
-
-        // if (adc_read_ok_counter++ % 5000 == 0) {
-        //     ESP_LOGI(AD_TAG, "Read ok. Raw data %d %d", raw_sample, pcm_sample);
-        // }
-    }
-}
-
-static bool IRAM_ATTR signal_adc_read_alarm_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data) {
-    QueueHandle_t notif_queue = (QueueHandle_t *) user_data;
-    xQueueSendFromISR(notif_queue, &dummy1, NULL);
-    return true;
-}
-
 
 void adc_audio_receive(uint8_t *dst, size_t *received, size_t requested_size) {
     if (!initialized || !enabled) {
@@ -178,25 +148,94 @@ void adc_audio_enable(uint8_t status) {
     
     if (status) {
         ESP_LOGW(AD_TAG, "Enabling ADC");
-        ESP_ERROR_CHECK(gptimer_set_raw_count(adc_read_timer, 0));
-        ESP_ERROR_CHECK(gptimer_start(adc_read_timer));
+        gpio_set_level(ADC_ENABLE_PIN, 1);
         enabled = 1;
         return;
     }
 
     ESP_LOGW(AD_TAG, "Disabling ADC");
-    ESP_ERROR_CHECK(gptimer_stop(adc_read_timer));
+    gpio_set_level(ADC_ENABLE_PIN, 0);
     enabled = 0;
 }
 
-void adc_audio_init(sample_rate_t sample_rate, QueueHandle_t data_ready_queue) {
+void adc_audio_init_transport() {
+    ESP_LOGI(AD_TAG, "Initializing ADC SPI transport");
+
+    QueueHandle_t adc_read_notif_queue = xQueueCreate(8, sizeof(uint8_t));
+    assert(adc_read_notif_queue != NULL);
+
+    BaseType_t r = xTaskCreatePinnedToCore(adc_read_spi_data_task_handler, "spi_data_task", 4092, adc_read_notif_queue, 20, NULL, 1);
+    assert(r == pdPASS);
+
+    // Configure enable pin
+    gpio_config_t output_conf = {};
+    output_conf.intr_type = GPIO_INTR_DISABLE;
+    output_conf.mode = GPIO_MODE_OUTPUT;
+    output_conf.pin_bit_mask = 1ULL << ADC_ENABLE_PIN;
+    ESP_ERROR_CHECK(gpio_config(&output_conf));
+
+    // Configure data ready pin
+    gpio_config_t input_conf = {};
+    input_conf.intr_type = GPIO_INTR_POSEDGE;
+    input_conf.mode = GPIO_MODE_INPUT;
+    input_conf.pin_bit_mask = 1ULL << ADC_DATA_READY_PIN;
+    input_conf.pull_up_en = 0;
+    input_conf.pull_down_en = 1;
+    ESP_ERROR_CHECK(gpio_config(&input_conf));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(ADC_DATA_READY_PIN, adc_data_available_isr, adc_read_notif_queue));
+
+    // Setup bus
+    spi_bus_cfg.miso_io_num = ADC_MISO_PIN;
+    spi_bus_cfg.mosi_io_num = ADC_MOSI_PIN;
+    spi_bus_cfg.sclk_io_num = ADC_CLK_PIN;
+    spi_bus_cfg.quadwp_io_num = -1;
+    spi_bus_cfg.quadhd_io_num = -1;
+    spi_bus_cfg.max_transfer_sz = 2;
+
+    // Setup device
+    spi_dev_cfg.clock_speed_hz = ADC_SPI_CLOCK_SPEED_HZ;
+    spi_dev_cfg.mode = 0;
+    spi_dev_cfg.command_bits = 0;
+    spi_dev_cfg.address_bits = 0;
+    spi_dev_cfg.dummy_bits = 0;
+    spi_dev_cfg.spics_io_num = ADC_CS_PIN;
+    spi_dev_cfg.queue_size = ADC_SPI_QUEUE_SIZE;
+
+    ESP_ERROR_CHECK(spi_bus_initialize(VSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_add_device(VSPI_HOST, &spi_dev_cfg, &spi));
+    ESP_ERROR_CHECK(spi_device_acquire_bus(spi, portMAX_DELAY));
+
+    int freq_khz;
+    size_t max_tx_length;
+
+    ESP_ERROR_CHECK(spi_device_get_actual_freq(spi, &freq_khz));
+    ESP_LOGI(AD_TAG, "Actual SPI transfer frequency %dKHZ", freq_khz);
+
+    ESP_ERROR_CHECK(spi_bus_get_max_transaction_len(VSPI_HOST, &max_tx_length));
+    ESP_LOGI(AD_TAG, "Max SPI transaction length: %d bytes", max_tx_length);
+
+    // Prepare transactions
+    memset(&adc_config_spi_tx, 0, sizeof(spi_transaction_t));
+    for (int i = 0; i < ADC_SPI_QUEUE_SIZE; i++) {
+        memset(&adc_data_tx[i], 0, sizeof(spi_transaction_t));
+        adc_data_tx[i].user = NULL;
+        adc_data_tx[i].rx_buffer = NULL;
+        adc_data_tx[i].tx_buffer = NULL;
+        adc_data_tx[i].length = 16;
+        adc_data_tx[i].flags = SPI_TRANS_USE_RXDATA;
+    }
+}
+
+void adc_audio_init(sample_rate_t sample_rate, QueueHandle_t audio_ready_q) {
     if (initialized) {
         return;
     }
     assert(sample_rate != SAMPLE_RATE_NONE);
     adc_sample_rate = sample_rate;
-    
+    audio_ready_queue = audio_ready_q;
+
     size_t adc_buf_size = adc_audio_get_buffer_size();
+    adc_buf_sample_count = adc_buf_size / 2;
     uint16_t sample_rate_hz = (sample_rate == SAMPLE_RATE_16KHZ) ? 16000 : 8000;
     ESP_LOGI(AD_TAG, "Initializing ADC. Sample rate: %d. Buffer size: %d", sample_rate_hz, adc_buf_size);
 
@@ -204,49 +243,8 @@ void adc_audio_init(sample_rate_t sample_rate, QueueHandle_t data_ready_queue) {
     assert(audio_in_buf != NULL);
     memset(audio_in_buf, '\0', adc_buf_size);
     
-    adc_oneshot_unit_init_cfg_t adc_config = {
-        .unit_id = ADC_UNIT_1
-    };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&adc_config, &adc_handle));
-    
-    adc_oneshot_chan_cfg_t channel_config = {
-        .bitwidth = ADC_BITWIDTH_12,
-        .atten = ADC_ATTEN_DB_11
-    };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(adc_handle, ADC_CHANNEL_0, &channel_config));
-    
     audio_in_rb = xRingbufferCreate(adc_audio_get_rb_size(), RINGBUF_TYPE_BYTEBUF);
     assert(audio_in_rb != NULL);
-    
-    adc_read_notif_queue = xQueueCreate(4, sizeof(uint8_t));
-    audio_provider_task_input.adc_read_notif_queue = adc_read_notif_queue;
-    audio_provider_task_input.audio_available_notif_queue = data_ready_queue;
-    audio_provider_task_input.rb = audio_in_rb;
-
-    BaseType_t r = xTaskCreatePinnedToCore(provide_audio_task_handler, "provide_audio", 4096, &audio_provider_task_input, 25, &audio_provider_task, 1);
-    assert(r == pdPASS);
-    
-    gptimer_config_t timer_config = {
-        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
-        .direction = GPTIMER_COUNT_UP,
-        .resolution_hz = 1000000 // 1MHZ
-    };
-    ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &adc_read_timer));
-        
-    gptimer_event_callbacks_t cbs = {
-        .on_alarm = signal_adc_read_alarm_callback
-    };
-    
-    ESP_ERROR_CHECK(gptimer_register_event_callbacks(adc_read_timer, &cbs, adc_read_notif_queue));
-    ESP_ERROR_CHECK(gptimer_enable(adc_read_timer));
-    
-    gptimer_alarm_config_t adc_read_alarm_config = {
-        .reload_count = 0,
-        .alarm_count = adc_read_get_period(),
-        .flags.auto_reload_on_alarm = true,
-    };
-    ESP_ERROR_CHECK(gptimer_set_alarm_action(adc_read_timer, &adc_read_alarm_config));
-
     initialized = 1;
 }
 
@@ -258,26 +256,16 @@ void adc_audio_deinit() {
     adc_audio_enable(0);
     
     adc_sample_rate = SAMPLE_RATE_NONE;
-    
-    gptimer_disable(adc_read_timer);
-    gptimer_del_timer(adc_read_timer);
-    
-    vTaskDelete(audio_provider_task);
-    
-    vQueueDelete(adc_read_notif_queue);
 
     vRingbufferDelete(audio_in_rb);
     audio_in_rb = NULL;
     
-    audio_provider_task_input.adc_read_notif_queue = NULL;
-    audio_provider_task_input.audio_available_notif_queue = NULL;
-    audio_provider_task_input.rb = NULL;
-
     free(audio_in_buf);
     audio_in_buf = NULL;
 
-    ESP_ERROR_CHECK(adc_oneshot_del_unit(adc_handle));
+    adc_configured = 0;
     initialized = 0;
+    audio_ready_queue = NULL;
 
     ESP_LOGI(AD_TAG, "De-initialized ADC");
 }
