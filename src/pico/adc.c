@@ -111,15 +111,8 @@ static void audio_adc_dma_isr() {
 #ifdef DEBUG_MODE
         spi_start_transfer_us = now;
 
-        if (sent_adc_counter++ % 250 == 0 && adc_samples_buf_index > -1) {
+        if (sent_adc_counter++ % 125 == 0 && adc_samples_buf_index > -1) {
             DEBUG("ADC Data transfered. Sampling duration: %lld us. SPI transfer duration: %lld\n", adc_sampling_duration_us, spi_transfer_duration_us);
-            for (int i = 0; i < adc_buffer_samples_count; i++) {
-                DEBUG("%d ", adc_samples_buf[adc_samples_buf_index][i]);
-                if (i && i % 8 == 0) {
-                    DEBUG("\n");
-                }
-            }
-            DEBUG("\n===================\n");
         }
 #endif
         gpio_put(data_ready_pin, 1);
@@ -143,10 +136,6 @@ static void spi_dma_isr() {
 #ifdef DEBUG_MODE
     absolute_time_t now = get_absolute_time();
     spi_transfer_duration_us = absolute_time_diff_us(spi_start_transfer_us, now);
-
-    if (sent_spi_counter++ % 500 == 0) {
-        DEBUG("SPI data transfered\n");
-    }
 #endif
 }
 

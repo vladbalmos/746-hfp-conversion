@@ -44,6 +44,10 @@ static int64_t last_transmission = 0;
 static void IRAM_ATTR data_read_isr(void* arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
     uint8_t dummy = 1;
+
+    int64_t now = esp_timer_get_time();
+    transmission_interval = now - last_transmission;
+    last_transmission = now;
     xQueueSendFromISR(q, &dummy, NULL);
 }
 
@@ -55,7 +59,7 @@ static void IRAM_ATTR on_spi_data_isr(spi_transaction_t *tx) {
     buf[sample_index] = sample;
     
     if (sample_index == (ADC_SAMPLES_COUNT - 1)) {
-        int64_t now = esp_timer_get_time();
+        uint64_t now = esp_timer_get_time();
         duration = now - start;
         xQueueSendFromISR(buf_ready_queue, &dummy, NULL);
     }
@@ -105,7 +109,7 @@ static void consume_audio_dac(void *arg) {
             continue;
         }
         buf = (uint8_t *) &dac_buf[buf_index];
-        dac_audio_send(buf, ADC_SAMPLES_COUNT * 2);
+        // dac_audio_send(buf, ADC_SAMPLES_COUNT * 2);
     }
 }
 
@@ -116,7 +120,7 @@ void app_main(void) {
     QueueHandle_t data_ready_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(data_ready_queue != NULL);
     
-    BaseType_t r = xTaskCreatePinnedToCore(read_spi_data_task_handler, "spi_data_task", 4092, data_ready_queue, 20, NULL, 0);
+    BaseType_t r = xTaskCreatePinnedToCore(read_spi_data_task_handler, "spi_data_task", 4092, data_ready_queue, 15, NULL, 0);
     assert(r == pdPASS);
 
     QueueHandle_t audio_queue = xQueueCreate(8, sizeof(uint8_t));
@@ -128,8 +132,8 @@ void app_main(void) {
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
     
     // Enable DAC
-    dac_audio_init(SAMPLE_RATE_16KHZ);;
-    dac_audio_enable(1);
+    // dac_audio_init(SAMPLE_RATE_16KHZ);;
+    // dac_audio_enable(1);
 
     // Configure enable pin
     gpio_config_t output_conf = {};
@@ -200,7 +204,6 @@ void app_main(void) {
 
     uint8_t dummy = 0;
     uint64_t print_counter = 0;
-    int64_t now = esp_timer_get_time();
 
     while (1) {
         if (xQueueReceive(buf_ready_queue, &dummy, (TickType_t)portMAX_DELAY) != pdTRUE) {
@@ -216,11 +219,8 @@ void app_main(void) {
             dac_buf_index = 0;
         }
 
-        now = esp_timer_get_time();
-        transmission_interval = now - last_transmission;
-        last_transmission = now;
         
-        if (print_counter++ % 1000 == 0) {
+        if (print_counter++ % 75 == 0) {
             ESP_LOGW(TAG, "Duration is %"PRId64, duration);
             ESP_LOGW(TAG, "Transmission interval %"PRId64, transmission_interval);
             // for (int i = 0; i < ADC_SAMPLES_COUNT; i++) {
