@@ -93,9 +93,16 @@ static void read_spi_data_task_handler(void *arg) {
         // }
         start = esp_timer_get_time();
         for (uint8_t i = 0; i < ADC_SAMPLES_COUNT; i++) {
-            adc_data_tx[i].user = (void *) i;
-            ESP_ERROR_CHECK(spi_device_queue_trans(spi, &adc_data_tx[i], portMAX_DELAY));
+            // adc_data_tx[i].user = (void *) i;
+            // ESP_ERROR_CHECK(spi_device_queue_trans(spi, &adc_data_tx[i], portMAX_DELAY));
+            ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &adc_data_tx[i]));
+            int16_t sample = SPI_SWAP_DATA_RX(*(uint32_t *)adc_data_tx[i].rx_data, 16);
+            buf[i] = sample;
+            
         }
+        uint64_t now = esp_timer_get_time();
+        duration = now - start;
+        xQueueSend(buf_ready_queue, &signal, 0);
     }
 }
 
@@ -109,7 +116,7 @@ static void consume_audio_dac(void *arg) {
             continue;
         }
         buf = (uint8_t *) &dac_buf[buf_index];
-        // dac_audio_send(buf, ADC_SAMPLES_COUNT * 2);
+        dac_audio_send(buf, ADC_SAMPLES_COUNT * 2);
     }
 }
 
@@ -132,8 +139,8 @@ void app_main(void) {
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
     
     // Enable DAC
-    // dac_audio_init(SAMPLE_RATE_16KHZ);;
-    // dac_audio_enable(1);
+    dac_audio_init(SAMPLE_RATE_16KHZ);;
+    dac_audio_enable(1);
 
     // Configure enable pin
     gpio_config_t output_conf = {};
@@ -183,7 +190,7 @@ void app_main(void) {
     spi_dev_cfg.dummy_bits = 0;
     spi_dev_cfg.spics_io_num = ADC_CS_PIN;
     spi_dev_cfg.queue_size = ADC_SPI_QUEUE_SIZE;
-    spi_dev_cfg.post_cb = on_spi_data_isr;
+    // spi_dev_cfg.post_cb = on_spi_data_isr;
  
     ESP_ERROR_CHECK(spi_bus_initialize(VSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
     ESP_ERROR_CHECK(spi_bus_add_device(VSPI_HOST, &spi_dev_cfg, &spi));
