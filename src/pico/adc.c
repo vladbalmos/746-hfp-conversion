@@ -29,10 +29,10 @@
 #define ADC_SPI_CS_PIN 13
 
 #define ADC_CLOCK_SPEED_HZ 48 * 1000 * 1000
-#define ADC_AUDIO_DMA_TIMER 0
-#define ADC_BIAS_VOLTAGE_SAMPLING_ALARM_TIMEOUT_MS 50
-
 #define ADC_MAX_BUFFERS 8
+#define ADC_SIGNAL_BIAS 2048
+#define ADC_AUDIO_SINEWAVE_DMA_TIMER 0
+
 
 static uint8_t data_ready_pin;
 
@@ -43,11 +43,10 @@ static int spi_dma_chan;
 // ADC & PCM related
 static sample_rate_t adc_sample_rate;
 static int16_t *adc_samples_buf[ADC_MAX_BUFFERS] = {0};
-static alarm_id_t bias_v_sampling_alarm;
 static int8_t adc_samples_buf_index = -1;
-static uint16_t bias_voltage = 0;
-size_t adc_buffer_samples_count = 0;
-int16_t *sinewave_buf = NULL;
+static size_t adc_buffer_samples_count = 0;
+static int16_t *sinewave_buf = NULL;
+static uint8_t sinewave_enabled = 0;
 
 #ifdef DEBUG_MODE
 static uint64_t sent_adc_counter = 0;
@@ -80,13 +79,6 @@ static int spi_write(const uint16_t *src, size_t len) {
     return write_count;
 }
 
-static int64_t sample_bias_voltage(alarm_id_t id, void *user_data) {
-    bias_voltage = adc_read();
-    // DEBUG("Bias voltage sample is: %d\n", bias_voltage);
-    bias_v_sampling_alarm = add_alarm_in_ms(ADC_BIAS_VOLTAGE_SAMPLING_ALARM_TIMEOUT_MS, sample_bias_voltage, NULL, true);
-    return 0;
-}
-
 static void audio_adc_dma_isr() {
 #ifdef DEBUG_MODE
     absolute_time_t now;
@@ -100,28 +92,36 @@ static void audio_adc_dma_isr() {
     
     dma_hw->ints0 = 1u << audio_adc_dma_chan;
 
-#ifdef DEBUG_MODE
-    if (sent_adc_counter++ % 250 == 0 && adc_samples_buf_index > -1) {
-        DEBUG("Bias voltage is: %d\n", bias_voltage);
-        DEBUG("ADC Data transfered. Sampling duration: %lld us. SPI transfer duration: %lld\n", adc_sampling_duration_us, spi_transfer_duration_us);
-        for (int i = 0; i < adc_buffer_samples_count; i++) {
-            DEBUG("%d ", adc_samples_buf[adc_samples_buf_index][i]);
-            if (i && i % 8 == 0) {
-                DEBUG("\n");
+
+    int32_t sample;
+    if (adc_samples_buf_index != -1) {
+        if (!sinewave_enabled) {
+            for (int i = 0; i < adc_buffer_samples_count; i++) {
+                sample = (adc_samples_buf[adc_samples_buf_index][i] - ADC_SIGNAL_BIAS) * 16;
+                
+                if (sample > INT16_MAX) {
+                    sample = INT16_MAX;
+                } else if (sample < INT16_MIN) {
+                    sample = INT16_MIN;
+                }
+                adc_samples_buf[adc_samples_buf_index][i] = (int16_t) sample;
             }
         }
-        DEBUG("\n===================\n");
-    }
-#endif
 
-    if (adc_samples_buf_index != -1) {
 #ifdef DEBUG_MODE
         spi_start_transfer_us = now;
-#endif
-        for (int i = 0; i < adc_buffer_samples_count; i++) {
-            adc_samples_buf[adc_samples_buf_index][i] -= bias_voltage;
-            adc_samples_buf[adc_samples_buf_index][i] *= 16;
+
+        if (sent_adc_counter++ % 250 == 0 && adc_samples_buf_index > -1) {
+            DEBUG("ADC Data transfered. Sampling duration: %lld us. SPI transfer duration: %lld\n", adc_sampling_duration_us, spi_transfer_duration_us);
+            for (int i = 0; i < adc_buffer_samples_count; i++) {
+                DEBUG("%d ", adc_samples_buf[adc_samples_buf_index][i]);
+                if (i && i % 8 == 0) {
+                    DEBUG("\n");
+                }
+            }
+            DEBUG("\n===================\n");
         }
+#endif
         gpio_put(data_ready_pin, 1);
         dma_channel_set_read_addr(spi_dma_chan, adc_samples_buf[adc_samples_buf_index], true);
     }
@@ -130,7 +130,9 @@ static void audio_adc_dma_isr() {
     if (adc_samples_buf_index >= ADC_MAX_BUFFERS) {
         adc_samples_buf_index = 0;
     }
-    // dma_channel_set_read_addr(audio_adc_dma_chan, sinewave_buf, false);
+    if (sinewave_enabled) {
+        dma_channel_set_read_addr(audio_adc_dma_chan, sinewave_buf, false);
+    }
     dma_channel_set_write_addr(audio_adc_dma_chan, adc_samples_buf[adc_samples_buf_index], true);
 }
 
@@ -162,50 +164,52 @@ void adc_transport_initialize(uint8_t gpio_ready_pin) {
     gpio_set_function(ADC_SPI_CS_PIN, GPIO_FUNC_SPI);
 }
 
-// static void init_audio_adc_dma() {
-//     // Configure ADC DMA channel for sampling the audio signal
-//     audio_adc_dma_chan = dma_claim_unused_channel(true);
-//     assert(audio_adc_dma_chan != -1);
-//     dma_timer_claim(ADC_AUDIO_DMA_TIMER);
+static void init_audio_sine_dma() {
+    sinewave_enabled = 1;
+    // Configure sinewave transfer DMA channel
+    audio_adc_dma_chan = dma_claim_unused_channel(true);
+    assert(audio_adc_dma_chan != -1);
+    dma_timer_claim(ADC_AUDIO_SINEWAVE_DMA_TIMER);
     
-//     dma_channel_config cfg = dma_channel_get_default_config(audio_adc_dma_chan);
-//     channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
-//     channel_config_set_read_increment(&cfg, true);
-//     channel_config_set_write_increment(&cfg, true);
-//     channel_config_set_dreq(&cfg, dma_get_timer_dreq(ADC_AUDIO_DMA_TIMER));
+    dma_channel_config cfg = dma_channel_get_default_config(audio_adc_dma_chan);
+    channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
+    channel_config_set_read_increment(&cfg, true);
+    channel_config_set_write_increment(&cfg, true);
+    channel_config_set_dreq(&cfg, dma_get_timer_dreq(ADC_AUDIO_SINEWAVE_DMA_TIMER));
 
-//     // TODO: replace this with DREQ_DMA once ADC is actually configured
-//     uint16_t dma_timer_num;
-//     uint16_t dma_timer_denom;
+    uint16_t dma_timer_num;
+    uint16_t dma_timer_denom;
 
-//     if (adc_sample_rate == SAMPLE_RATE_16KHZ) {
-//         dma_timer_num = 8;
-//         dma_timer_denom = 62500;
-//     } else if (adc_sample_rate == SAMPLE_RATE_8KHZ) {
-//         dma_timer_num = 4;
-//         dma_timer_denom = 62500;
-//     }
+    if (adc_sample_rate == SAMPLE_RATE_16KHZ) {
+        dma_timer_num = 8;
+        dma_timer_denom = 62500;
+    } else if (adc_sample_rate == SAMPLE_RATE_8KHZ) {
+        dma_timer_num = 4;
+        dma_timer_denom = 62500;
+    }
  
-//     uint32_t cpu_clock_freq_hz = clock_get_hz(clk_sys);
-//     float actual_sample_rate = cpu_clock_freq_hz * dma_timer_num / dma_timer_denom;
-//     DEBUG("Transfering data at %f hz %d %d %d %d\n", actual_sample_rate, cpu_clock_freq_hz, dma_timer_num, dma_timer_denom, adc_sample_rate);
-//     dma_timer_set_fraction(ADC_AUDIO_DMA_TIMER, dma_timer_num, dma_timer_denom);
+    uint32_t cpu_clock_freq_hz = clock_get_hz(clk_sys);
+    float actual_sample_rate = cpu_clock_freq_hz * dma_timer_num / dma_timer_denom;
+    DEBUG("Transfering data at %f hz %d %d %d %d\n", actual_sample_rate, cpu_clock_freq_hz, dma_timer_num, dma_timer_denom, adc_sample_rate);
+    dma_timer_set_fraction(ADC_AUDIO_SINEWAVE_DMA_TIMER, dma_timer_num, dma_timer_denom);
     
-//     dma_channel_configure(
-//         audio_adc_dma_chan,
-//         &cfg,
-//         NULL,
-//         NULL,
-//         adc_buffer_samples_count,
-//         false
-//     );
+    dma_channel_configure(
+        audio_adc_dma_chan,
+        &cfg,
+        NULL,
+        NULL,
+        adc_buffer_samples_count,
+        false
+    );
 
-//     dma_channel_set_irq0_enabled(audio_adc_dma_chan, true);
-//     irq_set_exclusive_handler(DMA_IRQ_0, audio_adc_dma_isr);
-//     irq_set_enabled(DMA_IRQ_0, true);
-// }
+    dma_channel_set_irq0_enabled(audio_adc_dma_chan, true);
+    irq_set_exclusive_handler(DMA_IRQ_0, audio_adc_dma_isr);
+    irq_set_enabled(DMA_IRQ_0, true);
+}
 
 static void init_audio_adc_dma() {
+    adc_init();
+
     // Configure ADC DMA channel for sampling the audio signal
     audio_adc_dma_chan = dma_claim_unused_channel(true);
     assert(audio_adc_dma_chan != -1);
@@ -277,13 +281,6 @@ static void init_spi_dma() {
     
 }
 
-void init_sampling_bias_voltage() {
-    adc_gpio_init(27);
-    adc_select_input(1);
-    bias_voltage = adc_read();
-    bias_v_sampling_alarm = add_alarm_in_ms(ADC_BIAS_VOLTAGE_SAMPLING_ALARM_TIMEOUT_MS, sample_bias_voltage, NULL, true);
-}
-
 void adc_initialize() {
     DEBUG("Initializing ADC\n");
     uint16_t sample_rate = 0;
@@ -318,12 +315,10 @@ void adc_initialize() {
         assert(adc_samples_buf[i] != NULL);
         memset(adc_samples_buf[i], 0, adc_buffer_samples_count * sizeof(uint16_t));
     }
-    
-    adc_init();
 
     init_audio_adc_dma();
+    // init_audio_sine_dma();
     init_spi_dma();
-    init_sampling_bias_voltage();
     
     
 #ifdef DEBUG_MODE
@@ -336,7 +331,11 @@ void adc_initialize() {
 
 void adc_deinit() {
     DEBUG("De-initializing ADC\n");
-
+    
+    if (!sinewave_enabled) {
+        adc_fifo_drain();
+    }
+    
     dma_channel_abort(audio_adc_dma_chan);
     dma_channel_abort(spi_dma_chan);
 
@@ -344,7 +343,9 @@ void adc_deinit() {
     irq_set_enabled(DMA_IRQ_0, false);
     irq_remove_handler(DMA_IRQ_0, audio_adc_dma_isr);
     dma_channel_set_irq0_enabled(audio_adc_dma_chan, false);
-    dma_timer_unclaim(ADC_AUDIO_DMA_TIMER);
+    if (dma_timer_is_claimed(ADC_AUDIO_SINEWAVE_DMA_TIMER)) {
+        dma_timer_unclaim(ADC_AUDIO_SINEWAVE_DMA_TIMER);
+    }
     dma_channel_unclaim(audio_adc_dma_chan);
     
     // de-init spi dma
@@ -357,6 +358,6 @@ void adc_deinit() {
         free(adc_samples_buf[i]);
         adc_samples_buf[i] = NULL;
     }
-    
-    cancel_alarm(bias_v_sampling_alarm);
+    sinewave_enabled = 0;
+
 }

@@ -10,6 +10,7 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "sample_rate.h"
+#include "dac_audio.h"
 
 #define TAG "TEST"
 
@@ -33,9 +34,9 @@ static uint8_t adc_configured = 0;
 static uint64_t spi_read_tx_counter = 0;
 static uint64_t spi_cb_counter = 0;
 static int64_t start;
-static IRAM_ATTR int64_t duration;
-static IRAM_ATTR int64_t transmission_interval;
-static IRAM_ATTR int64_t last_transmission = 0;
+static int64_t duration;
+static int64_t transmission_interval;
+static int64_t last_transmission = 0;
 
 static void IRAM_ATTR data_read_isr(void* arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
@@ -51,15 +52,10 @@ static void IRAM_ATTR on_spi_data_isr(spi_transaction_t *tx) {
     buf[sample_index] = sample;
     
     if (sample_index == (ADC_SAMPLES_COUNT - 1)) {
-        int64_t now = esp_timer_get_time();
-        duration = now - start;
-        transmission_interval = now - last_transmission;
-        last_transmission = now;
+        // int64_t now = esp_timer_get_time();
+        // duration = now - start;
         xQueueSendFromISR(buf_ready_queue, &dummy, NULL);
     }
-    // if (spi_cb_counter++ % 9600 == 0) {
-    //     ESP_DRAM_LOGE(TAG, "Sample index %d. Sample: %d", sample_index, sample);
-    // }
 }
 
 static void read_spi_data_task_handler(void *arg) {
@@ -107,6 +103,10 @@ void app_main(void) {
     assert(r == pdPASS);
 
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
+    
+    // Enable DAC
+    dac_audio_init(SAMPLE_RATE_16KHZ);;
+    dac_audio_enable(1);
 
     // Configure enable pin
     gpio_config_t output_conf = {};
@@ -158,9 +158,8 @@ void app_main(void) {
     spi_dev_cfg.queue_size = ADC_SPI_QUEUE_SIZE;
     spi_dev_cfg.post_cb = on_spi_data_isr;
  
-    // ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, 0));
-    ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
-    ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &spi_dev_cfg, &spi));
+    ESP_ERROR_CHECK(spi_bus_initialize(VSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_add_device(VSPI_HOST, &spi_dev_cfg, &spi));
     ESP_ERROR_CHECK(spi_device_acquire_bus(spi, portMAX_DELAY));
 
     int freq_khz;
@@ -169,7 +168,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(spi_device_get_actual_freq(spi, &freq_khz));
     ESP_LOGI(TAG, "Actual SPI transfer frequency %dKHZ", freq_khz);
 
-    ESP_ERROR_CHECK(spi_bus_get_max_transaction_len(HSPI_HOST, &max_tx_length));
+    ESP_ERROR_CHECK(spi_bus_get_max_transaction_len(VSPI_HOST, &max_tx_length));
     ESP_LOGI(TAG, "Max SPI transaction length: %d bytes", max_tx_length);
     
 
@@ -178,24 +177,29 @@ void app_main(void) {
 
     uint8_t dummy = 0;
     uint64_t print_counter = 0;
+    int64_t now = esp_timer_get_time();
+
     while (1) {
-        // vTaskDelay(1);
         if (xQueueReceive(buf_ready_queue, &dummy, (TickType_t)portMAX_DELAY) != pdTRUE) {
             continue;
         }
+        dac_audio_send((uint8_t *) buf, ADC_SAMPLES_COUNT * 2);
+        // now = esp_timer_get_time();
+        // transmission_interval = now - last_transmission;
+        // last_transmission = now;
         
-        if (print_counter++ % 250 == 0) {
-            ESP_LOGW(TAG, "Duration is %"PRId64, duration);
-            ESP_LOGW(TAG, "Transmission interval %"PRId64, transmission_interval);
-            for (int i = 0; i < ADC_SAMPLES_COUNT; i++) {
-                printf("%d ", buf[i]);
+        // if (print_counter++ % 250 == 0) {
+        //     ESP_LOGW(TAG, "Duration is %"PRId64, duration);
+        //     ESP_LOGW(TAG, "Transmission interval %"PRId64, transmission_interval);
+        //     // for (int i = 0; i < ADC_SAMPLES_COUNT; i++) {
+        //     //     printf("%d ", buf[i]);
                 
-                if (i && i % 16 == 0) {
-                    printf("\n");
-                }
-            }
-            printf("\n");
-        }
+        //     //     if (i && i % 16 == 0) {
+        //     //         printf("\n");
+        //     //     }
+        //     // }
+        //     // printf("\n");
+        // }
         
     }
 }
