@@ -72,7 +72,7 @@ static void consume_audio_task_handler(void *arg) {
     while (1) {
         vTaskSuspend(NULL);
         if (xQueueReceive(spi_data_queue, &sample, 0) != pdTRUE) {
-            sample = 0;
+            continue;
         }
 
         spi_transaction.tx_buffer = &sample;

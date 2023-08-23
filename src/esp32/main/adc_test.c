@@ -30,6 +30,9 @@ static spi_device_interface_config_t spi_dev_cfg;
 static spi_transaction_t adc_config_spi_tx;
 static spi_transaction_t adc_data_tx[ADC_SPI_QUEUE_SIZE];
 static int16_t buf[ADC_SAMPLES_COUNT];
+static int16_t dac_buf[3][ADC_SAMPLES_COUNT] = {0};
+static uint8_t dac_buf_index = 0;
+static uint8_t dac_streaming_started = 0;
 static uint8_t adc_configured = 0;
 static uint64_t spi_read_tx_counter = 0;
 static uint64_t spi_cb_counter = 0;
@@ -52,8 +55,8 @@ static void IRAM_ATTR on_spi_data_isr(spi_transaction_t *tx) {
     buf[sample_index] = sample;
     
     if (sample_index == (ADC_SAMPLES_COUNT - 1)) {
-        // int64_t now = esp_timer_get_time();
-        // duration = now - start;
+        int64_t now = esp_timer_get_time();
+        duration = now - start;
         xQueueSendFromISR(buf_ready_queue, &dummy, NULL);
     }
 }
@@ -81,14 +84,28 @@ static void read_spi_data_task_handler(void *arg) {
             continue;
         }
         
-        if (spi_read_tx_counter++ % 500 == 0) {
-            ESP_LOGW(TAG, "Receiving data");
-        }
+        // if (spi_read_tx_counter++ % 500 == 0) {
+        //     ESP_LOGW(TAG, "Receiving data");
+        // }
         start = esp_timer_get_time();
         for (uint8_t i = 0; i < ADC_SAMPLES_COUNT; i++) {
             adc_data_tx[i].user = (void *) i;
             ESP_ERROR_CHECK(spi_device_queue_trans(spi, &adc_data_tx[i], portMAX_DELAY));
         }
+    }
+}
+
+static void consume_audio_dac(void *arg) {
+    QueueHandle_t q = (QueueHandle_t) arg;
+    uint8_t buf_index = 0;
+    uint8_t *buf = NULL;
+    
+    while (1) {
+        if (xQueueReceive(q, &buf_index, (TickType_t)portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        buf = (uint8_t *) &dac_buf[buf_index];
+        dac_audio_send(buf, ADC_SAMPLES_COUNT * 2);
     }
 }
 
@@ -99,7 +116,13 @@ void app_main(void) {
     QueueHandle_t data_ready_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(data_ready_queue != NULL);
     
-    BaseType_t r = xTaskCreate(read_spi_data_task_handler, "spi_data_task", 4092, data_ready_queue, 15, NULL);
+    BaseType_t r = xTaskCreatePinnedToCore(read_spi_data_task_handler, "spi_data_task", 4092, data_ready_queue, 20, NULL, 0);
+    assert(r == pdPASS);
+
+    QueueHandle_t audio_queue = xQueueCreate(8, sizeof(uint8_t));
+    assert(audio_queue != NULL);
+
+    r = xTaskCreatePinnedToCore(consume_audio_dac, "consume_audio_dac", 4092, audio_queue, 10, NULL, 1);
     assert(r == pdPASS);
 
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
@@ -183,23 +206,32 @@ void app_main(void) {
         if (xQueueReceive(buf_ready_queue, &dummy, (TickType_t)portMAX_DELAY) != pdTRUE) {
             continue;
         }
-        dac_audio_send((uint8_t *) buf, ADC_SAMPLES_COUNT * 2);
-        // now = esp_timer_get_time();
-        // transmission_interval = now - last_transmission;
-        // last_transmission = now;
+
+        memcpy(&dac_buf[dac_buf_index++], buf, ADC_SAMPLES_COUNT * 2);
+
+        if (dac_buf_index >= 3) {
+            for (int i = 0; i < dac_buf_index; i++) {
+                xQueueSend(audio_queue, &i, portMAX_DELAY);
+            }
+            dac_buf_index = 0;
+        }
+
+        now = esp_timer_get_time();
+        transmission_interval = now - last_transmission;
+        last_transmission = now;
         
-        // if (print_counter++ % 250 == 0) {
-        //     ESP_LOGW(TAG, "Duration is %"PRId64, duration);
-        //     ESP_LOGW(TAG, "Transmission interval %"PRId64, transmission_interval);
-        //     // for (int i = 0; i < ADC_SAMPLES_COUNT; i++) {
-        //     //     printf("%d ", buf[i]);
+        if (print_counter++ % 1000 == 0) {
+            ESP_LOGW(TAG, "Duration is %"PRId64, duration);
+            ESP_LOGW(TAG, "Transmission interval %"PRId64, transmission_interval);
+            // for (int i = 0; i < ADC_SAMPLES_COUNT; i++) {
+            //     printf("%d ", buf[i]);
                 
-        //     //     if (i && i % 16 == 0) {
-        //     //         printf("\n");
-        //     //     }
-        //     // }
-        //     // printf("\n");
-        // }
+            //     if (i && i % 16 == 0) {
+            //         printf("\n");
+            //     }
+            // }
+            // printf("\n");
+        }
         
     }
 }
