@@ -201,7 +201,7 @@ void adc_audio_init_transport() {
     spi_dev_cfg.spics_io_num = ADC_CS_PIN;
     spi_dev_cfg.queue_size = ADC_SPI_QUEUE_SIZE;
 
-    ESP_ERROR_CHECK(spi_bus_initialize(VSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_initialize(VSPI_HOST, &spi_bus_cfg, 0));
     ESP_ERROR_CHECK(spi_bus_add_device(VSPI_HOST, &spi_dev_cfg, &spi));
     ESP_ERROR_CHECK(spi_device_acquire_bus(spi, portMAX_DELAY));
 

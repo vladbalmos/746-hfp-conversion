@@ -227,9 +227,9 @@ static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
     adc_audio_receive(p_buf, &item_size, sz);
     uint32_t ret = (item_size == sz) ? sz : 0;
 
-    if (send_buf_count++ % 100 == 0) {
-        ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %"PRId32", Sample count: %"PRId32". Return value: %"PRId32, interval, sz, sz / 2, ret);
-    }
+    // if (send_buf_count++ % 100 == 0) {
+    //     ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %"PRId32", Sample count: %"PRId32". Return value: %"PRId32, interval, sz, sz / 2, ret);
+    // }
     
     return ret;
 }
@@ -609,7 +609,7 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     bt_msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
     assert(bt_msg_queue != NULL);
     
-    adc_audio_init_transport();
+    // adc_audio_init_transport();
     
     bt_audio_data_available_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(bt_audio_data_available_queue != NULL);
