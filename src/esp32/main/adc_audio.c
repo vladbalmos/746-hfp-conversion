@@ -159,7 +159,7 @@ void adc_audio_init_transport() {
     QueueHandle_t adc_read_notif_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(adc_read_notif_queue != NULL);
 
-    BaseType_t r = xTaskCreatePinnedToCore(adc_read_spi_data_task_handler, "spi_data_task", 4092, adc_read_notif_queue, configMAX_PRIORITIES - 5, NULL, 0);
+    BaseType_t r = xTaskCreatePinnedToCore(adc_read_spi_data_task_handler, "spi_data_task", 4092, adc_read_notif_queue, configMAX_PRIORITIES - 5, NULL, 1);
     assert(r == pdPASS);
 
     // Configure enable pin
