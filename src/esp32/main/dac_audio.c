@@ -1,5 +1,3 @@
-#define INCLUDE_vTaskSuspend 1
-
 #include <stdio.h>
 #include <inttypes.h>
 #include <string.h>
@@ -70,7 +68,7 @@ static void consume_audio_task_handler(void *arg) {
     uint16_t sample;
 
     while (1) {
-        vTaskSuspend(NULL);
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         if (xQueueReceive(spi_data_queue, &sample, 0) != pdTRUE) {
             continue;
         }
@@ -85,10 +83,10 @@ static void consume_audio_task_handler(void *arg) {
     }
 }
 
-
 static bool IRAM_ATTR wakeup_spi_transfer_task(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data) {
     TaskHandle_t spi_transfer_task = (TaskHandle_t) user_data;
-    xTaskResumeFromISR(spi_transfer_task);
+    vTaskNotifyGiveFromISR(spi_transfer_task, NULL);
+    // xTaskResumeFromISR(spi_transfer_task);
     return true;
 }
 
@@ -193,6 +191,7 @@ void dac_audio_init(sample_rate_t sample_rate) {
 
     // Setup device
     spi_dev_cfg.clock_speed_hz = (dac_sample_rate == SAMPLE_RATE_16KHZ) ? 8000000 : 2000000;
+    // spi_dev_cfg.clock_speed_hz = (dac_sample_rate == SAMPLE_RATE_16KHZ) ? 2000000 : 2000000;
     spi_dev_cfg.mode = 0;
     spi_dev_cfg.command_bits = 0;
     spi_dev_cfg.address_bits = 0;

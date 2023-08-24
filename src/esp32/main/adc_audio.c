@@ -61,7 +61,6 @@ static void IRAM_ATTR adc_data_available_isr(void* arg) {
 
 static void adc_read_spi_data_task_handler(void *arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
-    int8_t notif_counter = 0;
     
     while (1) {
         if (xQueueReceive(q, &signal_flag2, (TickType_t)portMAX_DELAY) != pdTRUE) {
@@ -94,11 +93,7 @@ static void adc_read_spi_data_task_handler(void *arg) {
         duration_us = now_us - start_us;
         xRingbufferSend(audio_in_rb, audio_in_buf, adc_buf_sample_count * sizeof(int16_t), 0);
         
-        if (notif_counter++ > 0) {
-            xQueueSend(audio_ready_queue, &signal_flag2, 0);
-            notif_counter = 0;
-        }
-
+        xQueueSend(audio_ready_queue, &signal_flag2, 0);
     }
 }
 
@@ -164,7 +159,7 @@ void adc_audio_init_transport() {
     QueueHandle_t adc_read_notif_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(adc_read_notif_queue != NULL);
 
-    BaseType_t r = xTaskCreatePinnedToCore(adc_read_spi_data_task_handler, "spi_data_task", 4092, adc_read_notif_queue, 20, NULL, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(adc_read_spi_data_task_handler, "spi_data_task", 4092, adc_read_notif_queue, configMAX_PRIORITIES - 5, NULL, 0);
     assert(r == pdPASS);
 
     // Configure enable pin
@@ -201,7 +196,8 @@ void adc_audio_init_transport() {
     spi_dev_cfg.spics_io_num = ADC_CS_PIN;
     spi_dev_cfg.queue_size = ADC_SPI_QUEUE_SIZE;
 
-    ESP_ERROR_CHECK(spi_bus_initialize(VSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
+    // ESP_ERROR_CHECK(spi_bus_initialize(VSPI_HOST, &spi_bus_cfg, SPI_DMA_CH_AUTO));
+    ESP_ERROR_CHECK(spi_bus_initialize(VSPI_HOST, &spi_bus_cfg, 0));
     ESP_ERROR_CHECK(spi_bus_add_device(VSPI_HOST, &spi_dev_cfg, &spi));
     ESP_ERROR_CHECK(spi_device_acquire_bus(spi, portMAX_DELAY));
 

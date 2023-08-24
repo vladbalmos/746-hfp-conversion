@@ -1,8 +1,6 @@
 #include <inttypes.h>
-#include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "sample_rate.h"
-#include "freertos/ringbuf.h"
 
 void adc_audio_init_transport();
 void adc_audio_init(sample_rate_t sample_rate, QueueHandle_t audio_ready_queue);
