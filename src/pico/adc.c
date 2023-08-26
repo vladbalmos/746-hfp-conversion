@@ -215,8 +215,8 @@ static void init_audio_adc_dma() {
     } else if (adc_sample_rate == SAMPLE_RATE_8KHZ) {
         clock_div = 8 * 1000;
     }
-    float adc_clock_div = ADC_CLOCK_SPEED_HZ / (ADC_CLOCK_SPEED_HZ / clock_div);
-    DEBUG("Transfering data at %f hz. Requested sample rate: %d\n", adc_clock_div, adc_sample_rate);
+    float adc_clock_div = ADC_CLOCK_SPEED_HZ / clock_div;
+    DEBUG("Transfering data at %f hz. Requested sample rate: %d\n", ADC_CLOCK_SPEED_HZ / adc_clock_div, adc_sample_rate);
 
     adc_gpio_init(26);
     adc_select_input(0);
