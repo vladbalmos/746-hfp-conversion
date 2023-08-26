@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "pico/stdlib.h"
+#include "pico/util/queue.h"
+#include "pico/multicore.h"
 #include "hardware/spi.h"
 #include "hardware/dma.h"
 #include "hardware/adc.h"
@@ -47,6 +49,8 @@ static int8_t adc_samples_buf_index = -1;
 static size_t adc_buffer_samples_count = 0;
 static int16_t *sinewave_buf = NULL;
 static uint8_t sinewave_enabled = 0;
+static queue_t samples_ready_q;
+static queue_t samples_q;
 
 #ifdef DEBUG_MODE
 static uint64_t sent_adc_counter = 0;
@@ -115,8 +119,9 @@ static void audio_adc_dma_isr() {
             DEBUG("ADC Data transfered. Sampling duration: %lld us. SPI transfer duration: %lld\n", adc_sampling_duration_us, spi_transfer_duration_us);
         }
 #endif
-        gpio_put(data_ready_pin, 1);
-        dma_channel_set_read_addr(spi_dma_chan, adc_samples_buf[adc_samples_buf_index], true);
+        // gpio_put(data_ready_pin, 1);
+        // dma_channel_set_read_addr(spi_dma_chan, adc_samples_buf[adc_samples_buf_index], true);
+        queue_try_add(&samples_ready_q, adc_samples_buf[adc_samples_buf_index]);
     }
 
     adc_samples_buf_index++;
@@ -139,6 +144,26 @@ static void spi_dma_isr() {
 #endif
 }
 
+void core1_spi_transfer() {
+    // start periodically timer
+    while (true) {
+        __wfi();
+    }
+}
+
+void adc_transfer_samples() {
+    uint8_t *buf = NULL;
+    if (!queue_try_remove(&samples_ready_q, buf)) {
+        return __wfe();
+    }
+    
+    int16_t *samples_buf = (int16_t *) buf;
+    uint8_t i = 0;
+    for (i; i < adc_buffer_samples_count; i++) {
+        queue_try_add(&samples_q, &samples_buf[i]);
+    }
+}
+
 void adc_transport_initialize(uint8_t gpio_ready_pin) {
     data_ready_pin = gpio_ready_pin;
 
@@ -151,6 +176,9 @@ void adc_transport_initialize(uint8_t gpio_ready_pin) {
     gpio_set_function(ADC_SPI_SCK_PIN, GPIO_FUNC_SPI);
     gpio_set_function(ADC_SPI_TX_PIN, GPIO_FUNC_SPI);
     gpio_set_function(ADC_SPI_CS_PIN, GPIO_FUNC_SPI);
+    
+    
+    multicore_launch_core1(core1_spi_transfer);
 }
 
 static void init_audio_sine_dma() {
@@ -304,9 +332,12 @@ void adc_initialize() {
         assert(adc_samples_buf[i] != NULL);
         memset(adc_samples_buf[i], 0, adc_buffer_samples_count * sizeof(uint16_t));
     }
+    
+    queue_init(&samples_ready_q, sizeof(uint8_t *), 8);
+    queue_init(&samples_q, sizeof(int16_t), adc_buffer_samples_count * 4);
 
-    init_audio_adc_dma();
-    // init_audio_sine_dma();
+    // init_audio_adc_dma();
+    init_audio_sine_dma();
     init_spi_dma();
     
     

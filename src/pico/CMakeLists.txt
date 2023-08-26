@@ -28,6 +28,7 @@ pico_enable_stdio_uart(adc_main 1)
 target_link_libraries(adc_main
     pico_stdlib
     pico_malloc
+    pico_multicore
     hardware_adc
     hardware_dma
     hardware_sync

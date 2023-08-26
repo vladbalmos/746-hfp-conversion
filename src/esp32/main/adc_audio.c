@@ -36,6 +36,7 @@ static uint8_t adc_configured = 0;
 
 
 static uint8_t *audio_in_buf = NULL; // buffer holding ADC data
+static uint8_t audio_in_sample_index = 0;
 static sample_rate_t adc_sample_rate;
 static size_t adc_buf_sample_count = 0;
 static RingbufHandle_t audio_in_rb = NULL;
@@ -84,17 +85,30 @@ static void adc_read_spi_data_task_handler(void *arg) {
         
         start_us = esp_timer_get_time();
         int16_t *buf = (int16_t *) audio_in_buf;
-        for (uint8_t i = 0; i < adc_buf_sample_count; i++) {
-            ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &adc_data_tx[i]));
-            int16_t sample = SPI_SWAP_DATA_RX(*(uint32_t *)adc_data_tx[i].rx_data, 16);
-            buf[i] = sample;
-            
+        ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &adc_data_tx[0]));
+        int16_t sample = SPI_SWAP_DATA_RX(*(uint32_t *)adc_data_tx[0].rx_data, 16);
+        buf[audio_in_sample_index] = sample;
+        
+        if (audio_in_sample_index < (adc_buf_sample_count - 1)) {
+            continue;
         }
+
         now_us = esp_timer_get_time();
         duration_us = now_us - start_us;
         xRingbufferSend(audio_in_rb, audio_in_buf, adc_buf_sample_count * sizeof(int16_t), 0);
-        
         xQueueSend(audio_ready_queue, &signal_flag2, 0);
+
+        // for (uint8_t i = 0; i < adc_buf_sample_count; i++) {
+        //     ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &adc_data_tx[i]));
+        //     int16_t sample = SPI_SWAP_DATA_RX(*(uint32_t *)adc_data_tx[i].rx_data, 16);
+        //     buf[i] = sample;
+            
+        // }
+        // now_us = esp_timer_get_time();
+        // duration_us = now_us - start_us;
+        // xRingbufferSend(audio_in_rb, audio_in_buf, adc_buf_sample_count * sizeof(int16_t), 0);
+        
+        // xQueueSend(audio_ready_queue, &signal_flag2, 0);
     }
 }
 
@@ -160,7 +174,7 @@ void adc_audio_init_transport() {
     QueueHandle_t adc_read_notif_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(adc_read_notif_queue != NULL);
 
-    BaseType_t r = xTaskCreatePinnedToCore(adc_read_spi_data_task_handler, "spi_data_task", 4092, adc_read_notif_queue, 15, NULL, 0);
+    BaseType_t r = xTaskCreatePinnedToCore(adc_read_spi_data_task_handler, "spi_data_task", 4092, adc_read_notif_queue, 15, NULL, 1);
     assert(r == pdPASS);
 
     // Configure enable pin
