@@ -3,7 +3,7 @@
 #include "hardware/adc.h"
 #include "hardware/dma.h"
 #include "hardware/sync.h"
-#include "adc.h"
+#include "audio.h"
 #include "debug.h"
 
 #define LED_PIN PICO_DEFAULT_LED_PIN
@@ -11,8 +11,8 @@
 #define ENABLE_PIN 9
 #define DATA_READY_PIN 8
 
-static bool adc_enabled = false;
-static bool adc_initialized = false;
+static bool enabled = false;
+static bool initialized = false;
 static bool led_state = true;
 
 static alarm_id_t led_toggle_alarm = 0;
@@ -23,12 +23,12 @@ void gpio_callback(uint gpio, uint32_t event_mask) {
     }
     
     if (event_mask == GPIO_IRQ_EDGE_RISE) {
-        adc_enabled = true;
+        enabled = true;
         return;
     }
 
     if (event_mask == GPIO_IRQ_EDGE_FALL) {
-        adc_enabled = false;
+        enabled = false;
     }
 }
 
@@ -57,23 +57,23 @@ int main() {
     
     led_toggle_alarm = add_alarm_in_ms(LED_TOGGLE_TIMEOUT_MS, toggle_led_alarm_callback, NULL, true);
     
-    adc_transport_initialize(DATA_READY_PIN);
+    audio_transport_initialize(DATA_READY_PIN);
 
     while (1) {
-        if (adc_enabled && !adc_initialized) {
-            adc_initialize();
-            adc_initialized = true;
+        if (enabled && !initialized) {
+            audio_initialize();
+            initialized = true;
         }
         
-        if (!adc_enabled && adc_initialized) {
-            adc_initialized = false;
-            adc_deinit();
+        if (!enabled && initialized) {
+            initialized = false;
+            audio_deinit();
         }
         
-        if (adc_initialized) {
-            // Check for any samples in queue, and schedule spi transfer
+        if (initialized) {
+            // Check for any samples in queue, and schedule i2c transfer
             // If no samples available, it will block until next event
-            adc_transfer_samples();
+            audio_transfer_samples();
             continue;
         }
         

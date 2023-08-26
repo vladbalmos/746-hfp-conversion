@@ -12,8 +12,7 @@
 #include "esp_gap_bt_api.h"
 #include "esp_hf_client_api.h"
 #include "esp_log.h"
-#include "adc_audio.h"
-#include "dac_audio.h"
+#include "audio.h"
 #include "bt.h"
 
 
@@ -227,7 +226,7 @@ static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
     // size_t item_size = sz;
     // memset(p_buf, 0, sz);
     
-    adc_audio_receive(p_buf, &item_size, sz);
+    audio_receive(p_buf, &item_size, sz);
     uint32_t ret = (item_size == sz) ? sz : 0;
 
     // if (send_buf_count++ % 100 == 0) {
@@ -252,29 +251,24 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
         ESP_LOGI(BT_TAG, "Receive buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
     }
     
-    dac_audio_send(buf, size);
+    audio_send(buf, size);
 }
 
 static void bt_hf_client_audio_open(esp_hf_client_audio_state_t con_state) {
-    sample_rate_t current_sample_rate = dac_audio_get_sample_rate();
+    sample_rate_t current_sample_rate = audio_get_sample_rate();
     sample_rate_t new_sample_rate = (con_state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) 
                                                    ? SAMPLE_RATE_16KHZ : SAMPLE_RATE_8KHZ;
                                                    
     if (current_sample_rate != new_sample_rate) {
-        dac_audio_deinit();
-        dac_audio_init(new_sample_rate);
-        
-        adc_audio_deinit();
-        adc_audio_init(new_sample_rate, bt_audio_data_available_queue);
+        audio_deinit();
+        audio_init(new_sample_rate, bt_audio_data_available_queue);
     }
     
-    dac_audio_enable(1);
-    adc_audio_enable(1);
+    audio_enable(1);
 }
 
 static void bt_hf_client_audio_close() {
-    dac_audio_enable(0);
-    adc_audio_enable(0);
+    audio_enable(0);
 }
 
 static void esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
@@ -357,14 +351,12 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
             
             if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED) {
                 ESP_LOGI(BT_TAG, "Initializing dac");
-                dac_audio_init(SAMPLE_RATE_16KHZ);
-                adc_audio_init(SAMPLE_RATE_16KHZ, bt_audio_data_available_queue);
+                audio_init(SAMPLE_RATE_16KHZ, bt_audio_data_available_queue);
                 // Disable discoverability after first pair
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
             } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
                 ESP_LOGI(BT_TAG, "DE_Initializing dac");
-                dac_audio_deinit();
-                adc_audio_deinit();
+                audio_deinit();
                 // Re-enable discoverability
                 esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
             }
@@ -612,7 +604,7 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     bt_msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
     assert(bt_msg_queue != NULL);
     
-    adc_audio_init_transport();
+    audio_init_transport();
     
     bt_audio_data_available_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(bt_audio_data_available_queue != NULL);
