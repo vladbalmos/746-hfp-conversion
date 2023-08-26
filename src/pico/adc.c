@@ -301,15 +301,15 @@ void adc_initialize() {
     
     queue_init(&samples_ready_q, sizeof(uint8_t *), 8);
 
-    // init_audio_adc_dma();
-    init_audio_sine_dma();
+    init_audio_adc_dma();
+    // init_audio_sine_dma();
     
 #ifdef DEBUG_MODE
     adc_start_sampling_us = get_absolute_time();
 #endif
 
     audio_adc_dma_isr();
-    // adc_run(true);
+    adc_run(true);
     streaming_enabled = 1;
 }
 

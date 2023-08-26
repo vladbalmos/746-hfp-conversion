@@ -148,10 +148,10 @@ static void consume_audio_task_handler(void *arg) {
         // Wait for buffer to be added to ring buffer
         ulTaskNotifyTakeIndexed(0, pdTRUE, portMAX_DELAY);
         
-        ringbuf_free_size = xRingbufferGetCurFreeSize(rb);
-        if (ringbuf_free_size > ringbuf_send_threshold) {
-            continue;
-        }
+        // ringbuf_free_size = xRingbufferGetCurFreeSize(rb);
+        // if (ringbuf_free_size > ringbuf_send_threshold) {
+        //     continue;
+        // }
 
         buf_to_consume = xRingbufferReceiveUpTo(rb, &received_size, 0, request_buf_size);
         if (!received_size) {
@@ -249,10 +249,10 @@ void dac_audio_init(sample_rate_t sample_rate) {
     };
     ESP_ERROR_CHECK(gptimer_new_timer(&timer_config, &spi_transfer_timer));
 
-    BaseType_t r = xTaskCreatePinnedToCore(consume_audio_task_handler, "consume_audio", 2048, audio_out_rb, 5, &audio_consumer_task, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(consume_audio_task_handler, "consume_audio", 2048, audio_out_rb, 5, &audio_consumer_task, 0);
     assert(r == pdPASS);
 
-    r = xTaskCreatePinnedToCore(spi_transmit_task_handler, "spi_transmit", 2048, &spi_timer_callback_input, 15, &spi_transmit_task, 1);
+    r = xTaskCreatePinnedToCore(spi_transmit_task_handler, "spi_transmit", 2048, &spi_timer_callback_input, configMAX_PRIORITIES - 3, &spi_transmit_task, 1);
     assert(r == pdPASS);
     
     memset(&spi_timer_callback_input, 0, sizeof(spi_timer_callback_input_t));

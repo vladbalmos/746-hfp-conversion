@@ -81,7 +81,10 @@ static void adc_read_i2c_data_task_handler(void *arg) {
         
         // start_us = esp_timer_get_time();
         
-        ESP_ERROR_CHECK(i2c_master_read_from_device(I2C_PORT, 32, audio_in_buf, buf_size, portMAX_DELAY));
+        if (i2c_master_read_from_device(I2C_PORT, 32, audio_in_buf, buf_size, portMAX_DELAY) != ESP_OK) {
+            continue;
+        }
+
         if (xRingbufferSend(audio_in_rb, audio_in_buf, buf_size, 0) == pdTRUE) {
             xQueueSend(audio_ready_queue, &signal_flag1, 0);
         }
@@ -154,7 +157,7 @@ void adc_audio_init_transport() {
     QueueHandle_t adc_read_notif_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(adc_read_notif_queue != NULL);
 
-    BaseType_t r = xTaskCreatePinnedToCore(adc_read_i2c_data_task_handler, "i2c_data_task", 4092, adc_read_notif_queue, 10, NULL, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(adc_read_i2c_data_task_handler, "i2c_data_task", 4092, adc_read_notif_queue, 5, NULL, 1);
     assert(r == pdPASS);
 
     // Configure enable pin

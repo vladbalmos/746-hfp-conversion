@@ -192,7 +192,7 @@ static void bt_signal_audio_ready_handler(void *arg) {
 
         
         // Signal that audio data is available for sending
-        if (notify_counter++ % 2 == 0) {
+        if (++notify_counter % 2 == 0) {
             esp_hf_client_outgoing_data_ready();
         }
         if (notify_counter >= 255) {
