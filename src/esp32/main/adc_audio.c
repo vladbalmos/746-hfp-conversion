@@ -82,7 +82,7 @@ static void IRAM_ATTR on_pcm_receive(spi_transaction_t *tx) {
 
 static void adc_read_spi_data_task_handler(void *arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
-    int16_t sample = 0;
+    int16_t notified = 0;
 
     while (1) {
         if (xQueueReceive(q, &signal_flag2, (TickType_t)portMAX_DELAY) != pdTRUE) {
@@ -103,22 +103,34 @@ static void adc_read_spi_data_task_handler(void *arg) {
             continue;
         }
         
-        start_us = esp_timer_get_time();
+        samples_buf = (int16_t *) audio_in_buf;
 
-        adc_data_tx[audio_in_sample_index].user = audio_in_sample_index;
-        ESP_ERROR_CHECK(spi_device_queue_trans(spi, &adc_data_tx[audio_in_sample_index], 0));
-        audio_in_sample_index++;
-        
-        
-        now_us = esp_timer_get_time();
-        duration_us = now_us - start_us;
-        // ESP_LOGW(AD_TAG, "Duration %lld", duration_us);
+        // start_us = esp_timer_get_time();
 
-        if (audio_in_sample_index < adc_buf_sample_count) {
-            continue;
+        for (int i = 0; i < 4; i++) {
+            ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &adc_data_tx[audio_in_sample_index]));
+            pcm_sample = SPI_SWAP_DATA_RX(*(uint32_t *)adc_data_tx[audio_in_sample_index].rx_data, 16);
+            samples_buf[sample_index] = pcm_sample;
+
+            audio_in_sample_index++;
+
+            if (audio_in_sample_index < adc_buf_sample_count) {
+                continue;
+            }
+
+            audio_in_sample_index = 0;
+            if (xRingbufferSend(audio_in_rb, audio_in_buf, adc_buf_sample_count * sizeof(int16_t), 0) == pdTRUE) {
+                if (++notified % 2 == 0) {
+                    xQueueSend(audio_ready_queue, &signal_flag1, 0);
+                    notified = 0;
+                }
+            }
         }
-
-        audio_in_sample_index = 0;
+        
+        
+        // now_us = esp_timer_get_time();
+        // duration_us = now_us - start_us;
+        // ESP_LOGW(AD_TAG, "Duration %lld", duration_us);
     }
 }
 
@@ -184,7 +196,7 @@ void adc_audio_init_transport() {
     QueueHandle_t adc_read_notif_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(adc_read_notif_queue != NULL);
 
-    BaseType_t r = xTaskCreatePinnedToCore(adc_read_spi_data_task_handler, "spi_data_task", 4092, adc_read_notif_queue, 15, NULL, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(adc_read_spi_data_task_handler, "spi_data_task", 4092, adc_read_notif_queue, 10, NULL, 0);
     assert(r == pdPASS);
 
     // Configure enable pin
@@ -220,7 +232,7 @@ void adc_audio_init_transport() {
     spi_dev_cfg.dummy_bits = 0;
     spi_dev_cfg.spics_io_num = ADC_CS_PIN;
     spi_dev_cfg.queue_size = ADC_SPI_QUEUE_SIZE;
-    spi_dev_cfg.post_cb = on_pcm_receive;
+    // spi_dev_cfg.post_cb = on_pcm_receive;
 
     ESP_ERROR_CHECK(spi_bus_initialize(VSPI_HOST, &spi_bus_cfg, 0));
     ESP_ERROR_CHECK(spi_bus_add_device(VSPI_HOST, &spi_dev_cfg, &spi));

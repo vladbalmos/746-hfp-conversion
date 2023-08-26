@@ -60,6 +60,9 @@ static spi_bus_config_t spi_bus_cfg;
 static spi_device_interface_config_t spi_dev_cfg;
 static spi_transaction_t spi_transaction;
 
+static void IRAM_ATTR dummy_post_cb(spi_transaction_t *tx) {
+}
+
 /**
  * Return the buffer size based on current sample rate
  */
@@ -104,6 +107,7 @@ static void spi_transmit_task_handler(void *arg) {
         }
         
         // int64_t start_us = esp_timer_get_time();
+
         buf = (uint16_t *) input->buf;
         sample_index = input->buf_index / 2;
         
@@ -116,6 +120,8 @@ static void spi_transmit_task_handler(void *arg) {
         
         spi_transaction.tx_buffer = &input->pcm_sample;
         esp_err_t result = spi_device_polling_transmit(spi, &spi_transaction);
+        // esp_err_t result = spi_device_queue_trans(spi, &spi_transaction, 0);
+
         // int64_t now_us = esp_timer_get_time();
         // int64_t duration_us = now_us - start_us;
         // ESP_LOGW(DA_TAG, "Duration %lld", duration_us);
@@ -284,6 +290,7 @@ void dac_audio_init(sample_rate_t sample_rate) {
     spi_dev_cfg.dummy_bits = 0;
     spi_dev_cfg.spics_io_num = DAC_CS_PIN;
     spi_dev_cfg.queue_size = DAC_SPI_QUEUE_SIZE;
+
     
     ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_bus_cfg, 0));
     ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &spi_dev_cfg, &spi));

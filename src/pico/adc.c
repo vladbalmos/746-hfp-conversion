@@ -128,14 +128,18 @@ static void audio_adc_dma_isr() {
     dma_channel_set_write_addr(audio_adc_dma_chan, adc_samples_buf[adc_samples_buf_index], true);
 }
 
-bool spi_transfer_sample(repeating_timer_t *rt) {
+bool spi_transfer_samples(repeating_timer_t *rt) {
     int16_t sample = 0;
 #ifdef DEBUG_MODE
     absolute_time_t now = get_absolute_time();
 #endif
 
-    if (queue_try_remove(&samples_q, &sample)) {
-        spi_write(&sample, 1);
+    for (int i = 0; i < 4; i++) {
+        gpio_put(data_ready_pin, 1);
+        if (queue_try_remove(&samples_q, &sample)) {
+            spi_write16_blocking(spi1, (uint16_t *) &sample, 1);
+        }
+        gpio_put(data_ready_pin, 0);
     }
 
 #ifdef DEBUG_MODE
@@ -157,11 +161,11 @@ void core1_spi_transfer() {
     // start periodically timer
     while (true) {
         if (!streaming_configured && streaming_enabled) {
-            float freq = (adc_sample_rate == SAMPLE_RATE_16KHZ) ? 16000.0 : 8000.0;
+            float freq = ((adc_sample_rate == SAMPLE_RATE_16KHZ) ? 16000.0 : 8000.0) / 4;
             streaming_configured = 1;
             int64_t delay_us = -1000000 / freq;
             DEBUG("SPI timer delay is: %lld\n", delay_us);
-            alarm_pool_add_repeating_timer_us(alarm_pool, delay_us, spi_transfer_sample, NULL, &spi_send_timer);
+            alarm_pool_add_repeating_timer_us(alarm_pool, delay_us, spi_transfer_samples, NULL, &spi_send_timer);
         }
         
         if (streaming_configured && !streaming_enabled) {

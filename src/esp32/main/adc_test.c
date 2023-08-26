@@ -45,7 +45,7 @@ void app_main(void) {
     sample_rate = SAMPLE_RATE_16KHZ;
     // sample_rate = SAMPLE_RATE_8KHZ;
 
-    BaseType_t r = xTaskCreatePinnedToCore(consume_audio_dac, "consume_audio_dac", 4092, audio_queue, 10, NULL, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(consume_audio_dac, "consume_audio_dac", 4092, audio_queue, 5, NULL, 1);
     assert(r == pdPASS);
 
     adc_audio_init_transport();
