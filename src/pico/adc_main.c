@@ -4,6 +4,7 @@
 #include "hardware/dma.h"
 #include "hardware/sync.h"
 #include "adc.h"
+#include "debug.h"
 
 #define LED_PIN PICO_DEFAULT_LED_PIN
 #define LED_TOGGLE_TIMEOUT_MS 250
@@ -57,7 +58,6 @@ int main() {
     led_toggle_alarm = add_alarm_in_ms(LED_TOGGLE_TIMEOUT_MS, toggle_led_alarm_callback, NULL, true);
     
     adc_transport_initialize(DATA_READY_PIN);
-
 
     while (1) {
         __wfi();
