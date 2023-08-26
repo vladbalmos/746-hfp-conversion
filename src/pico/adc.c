@@ -1,13 +1,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "hardware/adc.h"
+#include "hardware/clocks.h"
+#include "hardware/i2c.h"
 #include "pico/stdlib.h"
 #include "pico/util/queue.h"
 #include "pico/multicore.h"
-#include "hardware/spi.h"
+#include "pico/i2c_slave.h"
 #include "hardware/dma.h"
-#include "hardware/adc.h"
-#include "hardware/clocks.h"
 #include "sample_rate.h"
 #include "sine_16000_666.h"
 #include "sine_8000_666.h"
@@ -30,6 +31,11 @@
 #define ADC_SPI_SCK_PIN 10
 #define ADC_SPI_CS_PIN 13
 
+#define I2C_BAUDRATE 1000000
+// #define I2C_BAUDRATE 100000
+#define ADC_SDA_PIN 12
+#define ADC_SCL_PIN 13
+
 #define ADC_CLOCK_SPEED_HZ 48 * 1000 * 1000
 #define ADC_MAX_BUFFERS 8
 #define ADC_SIGNAL_BIAS 2048
@@ -46,12 +52,13 @@ static uint8_t streaming_enabled = 0;
 // ADC & PCM related
 static sample_rate_t adc_sample_rate;
 static int16_t *adc_samples_buf[ADC_MAX_BUFFERS] = {0};
+static uint8_t *i2c_data_buf = NULL;
 static int8_t adc_samples_buf_index = -1;
 static size_t adc_buffer_samples_count = 0;
 static int16_t *sinewave_buf = NULL;
 static uint8_t sinewave_enabled = 0;
 static queue_t samples_ready_q;
-static queue_t samples_q;
+static queue_t i2c_msg_q;
 
 #ifdef DEBUG_MODE
 static uint64_t sent_adc_counter = 0;
@@ -60,26 +67,6 @@ static absolute_time_t spi_last_sent_sample_us;
 static absolute_time_t adc_start_sampling_us;
 static int64_t adc_sampling_duration_us = 0;
 #endif
-
-static int spi_read(uint16_t *dst, size_t len) {
-    size_t read_count = 0;
-
-    gpio_put(data_ready_pin, 1);
-    read_count = spi_read16_blocking(spi1, 0, dst, len);
-    gpio_put(data_ready_pin, 0);
-    
-    return read_count;
-}
-
-static int spi_write(const uint16_t *src, size_t len) {
-    size_t write_count = 0;
-
-    gpio_put(data_ready_pin, 1);
-    write_count = spi_write16_blocking(spi1, src, len);
-    gpio_put(data_ready_pin, 0);
-    
-    return write_count;
-}
 
 static void audio_adc_dma_isr() {
 #ifdef DEBUG_MODE
@@ -128,88 +115,53 @@ static void audio_adc_dma_isr() {
     dma_channel_set_write_addr(audio_adc_dma_chan, adc_samples_buf[adc_samples_buf_index], true);
 }
 
-bool spi_transfer_samples(repeating_timer_t *rt) {
-    int16_t sample = 0;
-#ifdef DEBUG_MODE
-    absolute_time_t now = get_absolute_time();
-#endif
-
-    for (int i = 0; i < 4; i++) {
-        gpio_put(data_ready_pin, 1);
-        if (queue_try_remove(&samples_q, &sample)) {
-            spi_write16_blocking(spi1, (uint16_t *) &sample, 1);
-        }
-        gpio_put(data_ready_pin, 0);
-    }
-
-#ifdef DEBUG_MODE
-    if (sent_spi_counter++ % 10000 == 0) {
-        int64_t elapsed_us = absolute_time_diff_us(spi_last_sent_sample_us, now);
-        DEBUG("Elapsed since last sample: %lld\n", elapsed_us);
-    }
-    spi_last_sent_sample_us = now;
-#endif
-    return true;
-}
-
-void core1_spi_transfer() {
-    alarm_pool_t *alarm_pool = alarm_pool_create(PICO_TIME_DEFAULT_ALARM_POOL_HARDWARE_ALARM_NUM - 1, 1);
-    repeating_timer_t spi_send_timer;
-    uint8_t streaming_configured = 0;
-    DEBUG("Launched second core\n");
-
-    // start periodically timer
-    while (true) {
-        if (!streaming_configured && streaming_enabled) {
-            float freq = ((adc_sample_rate == SAMPLE_RATE_16KHZ) ? 16000.0 : 8000.0) / 4;
-            streaming_configured = 1;
-            int64_t delay_us = -1000000 / freq;
-            DEBUG("SPI timer delay is: %lld\n", delay_us);
-            alarm_pool_add_repeating_timer_us(alarm_pool, delay_us, spi_transfer_samples, NULL, &spi_send_timer);
-        }
-        
-        if (streaming_configured && !streaming_enabled) {
-            streaming_configured = 0;
-            cancel_repeating_timer(&spi_send_timer);
-        }
-        __wfe();
-    }
-}
-
 void adc_transfer_samples() {
     uint8_t *buf = NULL;
     if (!queue_try_remove(&samples_ready_q, &buf)) {
         return __wfe();
     }
     
-    int16_t *samples_buf = (int16_t *) buf;
-    // DEBUG("========================\n");
-    for (int i = 0; i < adc_buffer_samples_count; i++) {
-        // DEBUG("%d ", samples_buf[i]);
-        
-        // if (i && i % 8 == 0) {
-        //     DEBUG("\n");
-        // }
-        queue_try_add(&samples_q, &samples_buf[i]);
+    gpio_put(data_ready_pin, 1);
+    memcpy(i2c_data_buf, buf, adc_buffer_samples_count * sizeof(uint16_t));
+    gpio_put(data_ready_pin, 0);
+    // i2c_write_raw_blocking(i2c0, buf, adc_buffer_samples_count * 2);
+}
+
+
+// Our handler is called from the I2C ISR, so it must complete quickly. Blocking calls /
+// printing to stdio may interfere with interrupt handling.
+static void i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
+    uint8_t data;
+    switch (event) {
+        case I2C_SLAVE_RECEIVE: {
+            data = i2c_read_byte_raw(i2c);
+            queue_try_add(&i2c_msg_q, &data);
+            break;
+        }
+        case I2C_SLAVE_REQUEST: // master is requesting data
+            i2c_write_raw_blocking(i2c0, i2c_data_buf, adc_buffer_samples_count * sizeof(uint16_t));
+            break;
+        case I2C_SLAVE_FINISH: // master has signalled Stop / Restart
+            // context.mem_address_written = false;
+            break;
+        default:
+            break;
     }
-    // DEBUG("\n--------------------------------------------\n");
 }
 
 void adc_transport_initialize(uint8_t gpio_ready_pin) {
     data_ready_pin = gpio_ready_pin;
 
-    uint actual_baud_rate = spi_init(spi1, SPI_BAUDRATE_HZ);
-    spi_set_slave(spi1, true);
-    spi_set_format(spi1, 16, 0, 0, SPI_MSB_FIRST);
-    DEBUG("Initialized SPI with baudrate: %d\n", actual_baud_rate);
+    gpio_init(ADC_SDA_PIN);
+    gpio_set_function(ADC_SDA_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(ADC_SDA_PIN);
+
+    gpio_init(ADC_SCL_PIN);
+    gpio_set_function(ADC_SCL_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(ADC_SCL_PIN);
     
-    gpio_set_function(ADC_SPI_RX_PIN, GPIO_FUNC_SPI);
-    gpio_set_function(ADC_SPI_SCK_PIN, GPIO_FUNC_SPI);
-    gpio_set_function(ADC_SPI_TX_PIN, GPIO_FUNC_SPI);
-    gpio_set_function(ADC_SPI_CS_PIN, GPIO_FUNC_SPI);
-    
-    
-    multicore_launch_core1(core1_spi_transfer);
+    i2c_init(i2c0, I2C_BAUDRATE);
+    i2c_slave_init(i2c0, 32, &i2c_slave_handler);
 }
 
 static void init_audio_sine_dma() {
@@ -308,14 +260,17 @@ static void init_audio_adc_dma() {
 
 void adc_initialize() {
     DEBUG("Initializing ADC\n");
-    uint16_t sample_rate = 0;
-    size_t read_count;
+    queue_init(&i2c_msg_q, sizeof(uint8_t), 1);
 
-    // Read sampling rate from master
-    read_count = spi_read(&sample_rate, 1);
+    uint16_t sample_rate = 0;
+
+    gpio_put(data_ready_pin, 1);
+    sleep_ms(1);
+    gpio_put(data_ready_pin, 0);
+    
+    queue_remove_blocking(&i2c_msg_q, &sample_rate);
 
     DEBUG("Sample rate raw value: %d\n", sample_rate);
-    assert(read_count == 1);
     assert(sample_rate == SAMPLE_RATE_16KHZ || sample_rate == SAMPLE_RATE_8KHZ);
     
     if (sample_rate == SAMPLE_RATE_8KHZ) {
@@ -341,8 +296,10 @@ void adc_initialize() {
         memset(adc_samples_buf[i], 0, adc_buffer_samples_count * sizeof(uint16_t));
     }
     
+    i2c_data_buf = malloc(adc_buffer_samples_count * sizeof(uint16_t));
+    assert(i2c_data_buf != NULL);
+    
     queue_init(&samples_ready_q, sizeof(uint8_t *), 8);
-    queue_init(&samples_q, sizeof(int16_t), adc_buffer_samples_count * 4);
 
     // init_audio_adc_dma();
     init_audio_sine_dma();

@@ -29,10 +29,11 @@ target_link_libraries(adc_main
     pico_stdlib
     pico_malloc
     pico_multicore
+    pico_i2c_slave
     hardware_adc
     hardware_dma
     hardware_sync
-    hardware_spi
+    hardware_i2c
     )
 
 if(DEFINED ENV{DEBUG_MODE})
