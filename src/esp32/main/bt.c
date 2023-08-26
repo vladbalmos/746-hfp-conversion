@@ -177,7 +177,7 @@ const char *c_inband_ring_state_str[] = {
 
 static void bt_signal_audio_ready_handler(void *arg) {
     uint8_t _;
-    uint8_t notif_counter = 0;
+    uint8_t notify_counter = 0;
 
     while (1) {
         if (xQueueReceive(bt_audio_data_available_queue, &_, (TickType_t)portMAX_DELAY) != pdTRUE) {
@@ -189,14 +189,14 @@ static void bt_signal_audio_ready_handler(void *arg) {
             vTaskDelay(1);
             continue;
         }
+
         
-        if (notif_counter++ % 2 == 0) {
-            // Signal that audio data is available for sending
+        // Signal that audio data is available for sending
+        if (++notify_counter % 2 == 0) {
             esp_hf_client_outgoing_data_ready();
         }
-        
-        if (notif_counter >= 255) {
-            notif_counter = 0;
+        if (notify_counter >= 255) {
+            notify_counter = 0;
         }
     }
 }
@@ -617,12 +617,11 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     bt_audio_data_available_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(bt_audio_data_available_queue != NULL);
 
-    r = xTaskCreatePinnedToCore(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 4096, NULL, 5, NULL, 0);
+    r = xTaskCreatePinnedToCore(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 4096, NULL, 10, NULL, 0);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created audio handler task");
 
-    // r = xTaskCreatePinnedToCore(bt_msg_handler, "bt_msg_handler", 8192, NULL, configMAX_PRIORITIES - 3, NULL, 0);
-    r = xTaskCreatePinnedToCore(bt_msg_handler, "bt_msg_handler", 8192, NULL, 3, NULL, 0);
+    r = xTaskCreatePinnedToCore(bt_msg_handler, "bt_msg_handler", 8192, NULL, 5, NULL, 0);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created bluetooth task");
     

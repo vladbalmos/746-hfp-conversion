@@ -4,6 +4,7 @@
 #include "hardware/dma.h"
 #include "hardware/sync.h"
 #include "adc.h"
+#include "debug.h"
 
 #define LED_PIN PICO_DEFAULT_LED_PIN
 #define LED_TOGGLE_TIMEOUT_MS 250
@@ -58,20 +59,24 @@ int main() {
     
     adc_transport_initialize(DATA_READY_PIN);
 
-
     while (1) {
-        __wfi();
-        
         if (adc_enabled && !adc_initialized) {
             adc_initialize();
             adc_initialized = true;
-            continue;
         }
         
         if (!adc_enabled && adc_initialized) {
             adc_initialized = false;
             adc_deinit();
+        }
+        
+        if (adc_initialized) {
+            // Check for any samples in queue, and schedule spi transfer
+            // If no samples available, it will block until next event
+            adc_transfer_samples();
             continue;
         }
+        
+        __wfe();
     }
 }
