@@ -103,6 +103,7 @@ static void spi_transmit_task_handler(void *arg) {
             continue;
         }
         
+        // int64_t start_us = esp_timer_get_time();
         buf = (uint16_t *) input->buf;
         sample_index = input->buf_index / 2;
         
@@ -115,6 +116,10 @@ static void spi_transmit_task_handler(void *arg) {
         
         spi_transaction.tx_buffer = &input->pcm_sample;
         esp_err_t result = spi_device_polling_transmit(spi, &spi_transaction);
+        // int64_t now_us = esp_timer_get_time();
+        // int64_t duration_us = now_us - start_us;
+        // ESP_LOGW(DA_TAG, "Duration %lld", duration_us);
+
         if (result != ESP_OK) {
             if (failed_to_send_spi_tx_counter++ % 100 == 0) {
                 ESP_LOGE(DA_TAG, "Failed to send spi transaction: %d", result);
@@ -183,7 +188,6 @@ void dac_audio_send(const uint8_t *buf, size_t size) {
         return;
     }
     
-    // @TODO: add error handling
     xRingbufferSend(audio_out_rb, buf, size, 0);
     xTaskNotifyGiveIndexed(audio_consumer_task, 0);
 }

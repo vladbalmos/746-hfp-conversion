@@ -41,6 +41,7 @@ static uint8_t data_ready_pin;
 // SPI related
 static int audio_adc_dma_chan;
 static int spi_dma_chan;
+static uint8_t streaming_enabled = 0;
 
 // ADC & PCM related
 static sample_rate_t adc_sample_rate;
@@ -55,13 +56,10 @@ static queue_t samples_q;
 #ifdef DEBUG_MODE
 static uint64_t sent_adc_counter = 0;
 static uint64_t sent_spi_counter = 0;
+static absolute_time_t spi_last_sent_sample_us;
 static absolute_time_t adc_start_sampling_us;
 static int64_t adc_sampling_duration_us = 0;
-static absolute_time_t spi_start_transfer_us;
-static int64_t spi_transfer_duration_us = 0;
 #endif
-
-static void spi_dma_isr();
 
 static int spi_read(uint16_t *dst, size_t len) {
     size_t read_count = 0;
@@ -113,15 +111,11 @@ static void audio_adc_dma_isr() {
         }
 
 #ifdef DEBUG_MODE
-        spi_start_transfer_us = now;
-
         if (sent_adc_counter++ % 125 == 0 && adc_samples_buf_index > -1) {
-            DEBUG("ADC Data transfered. Sampling duration: %lld us. SPI transfer duration: %lld\n", adc_sampling_duration_us, spi_transfer_duration_us);
+            DEBUG("ADC Data transfered. Sampling duration: %lld us.\n", adc_sampling_duration_us);
         }
 #endif
-        // gpio_put(data_ready_pin, 1);
-        // dma_channel_set_read_addr(spi_dma_chan, adc_samples_buf[adc_samples_buf_index], true);
-        queue_try_add(&samples_ready_q, adc_samples_buf[adc_samples_buf_index]);
+        queue_try_add(&samples_ready_q, &adc_samples_buf[adc_samples_buf_index]);
     }
 
     adc_samples_buf_index++;
@@ -134,34 +128,67 @@ static void audio_adc_dma_isr() {
     dma_channel_set_write_addr(audio_adc_dma_chan, adc_samples_buf[adc_samples_buf_index], true);
 }
 
-static void spi_dma_isr() {
-    gpio_put(data_ready_pin, 0);
-    dma_hw->ints1 = 1u << spi_dma_chan;
-    
+bool spi_transfer_sample(repeating_timer_t *rt) {
+    int16_t sample = 0;
 #ifdef DEBUG_MODE
     absolute_time_t now = get_absolute_time();
-    spi_transfer_duration_us = absolute_time_diff_us(spi_start_transfer_us, now);
 #endif
+
+    if (queue_try_remove(&samples_q, &sample)) {
+        spi_write(&sample, 1);
+    }
+
+#ifdef DEBUG_MODE
+    if (sent_spi_counter++ % 10000 == 0) {
+        int64_t elapsed_us = absolute_time_diff_us(spi_last_sent_sample_us, now);
+        DEBUG("Elapsed since last sample: %lld\n", elapsed_us);
+    }
+    spi_last_sent_sample_us = now;
+#endif
+    return true;
 }
 
 void core1_spi_transfer() {
+    alarm_pool_t *alarm_pool = alarm_pool_create(PICO_TIME_DEFAULT_ALARM_POOL_HARDWARE_ALARM_NUM - 1, 1);
+    repeating_timer_t spi_send_timer;
+    uint8_t streaming_configured = 0;
+    DEBUG("Launched second core\n");
+
     // start periodically timer
     while (true) {
-        __wfi();
+        if (!streaming_configured && streaming_enabled) {
+            float freq = (adc_sample_rate == SAMPLE_RATE_16KHZ) ? 16000.0 : 8000.0;
+            streaming_configured = 1;
+            int64_t delay_us = -1000000 / freq;
+            DEBUG("SPI timer delay is: %lld\n", delay_us);
+            alarm_pool_add_repeating_timer_us(alarm_pool, delay_us, spi_transfer_sample, NULL, &spi_send_timer);
+        }
+        
+        if (streaming_configured && !streaming_enabled) {
+            streaming_configured = 0;
+            cancel_repeating_timer(&spi_send_timer);
+        }
+        __wfe();
     }
 }
 
 void adc_transfer_samples() {
     uint8_t *buf = NULL;
-    if (!queue_try_remove(&samples_ready_q, buf)) {
+    if (!queue_try_remove(&samples_ready_q, &buf)) {
         return __wfe();
     }
     
     int16_t *samples_buf = (int16_t *) buf;
-    uint8_t i = 0;
-    for (i; i < adc_buffer_samples_count; i++) {
+    // DEBUG("========================\n");
+    for (int i = 0; i < adc_buffer_samples_count; i++) {
+        // DEBUG("%d ", samples_buf[i]);
+        
+        // if (i && i % 8 == 0) {
+        //     DEBUG("\n");
+        // }
         queue_try_add(&samples_q, &samples_buf[i]);
     }
+    // DEBUG("\n--------------------------------------------\n");
 }
 
 void adc_transport_initialize(uint8_t gpio_ready_pin) {
@@ -206,8 +233,12 @@ static void init_audio_sine_dma() {
     }
  
     uint32_t cpu_clock_freq_hz = clock_get_hz(clk_sys);
+
+#ifdef DEBUG_MODE
     float actual_sample_rate = cpu_clock_freq_hz * dma_timer_num / dma_timer_denom;
     DEBUG("Transfering data at %f hz %d %d %d %d\n", actual_sample_rate, cpu_clock_freq_hz, dma_timer_num, dma_timer_denom, adc_sample_rate);
+#endif
+
     dma_timer_set_fraction(ADC_AUDIO_SINEWAVE_DMA_TIMER, dma_timer_num, dma_timer_denom);
     
     dma_channel_configure(
@@ -271,37 +302,10 @@ static void init_audio_adc_dma() {
     irq_set_enabled(DMA_IRQ_0, true);
 }
 
-static void init_spi_dma() {
-    // Configure SPI DMA channel
-    spi_dma_chan = dma_claim_unused_channel(true);
-    assert(audio_adc_dma_chan != -1);
-    
-    dma_channel_config cfg;
-    cfg = dma_channel_get_default_config(spi_dma_chan);
-    channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
-    channel_config_set_read_increment(&cfg, true);
-    channel_config_set_write_increment(&cfg, false);
-    channel_config_set_dreq(&cfg, spi_get_dreq(spi1, true));
-
-    dma_channel_configure(
-        spi_dma_chan,
-        &cfg,
-        &spi_get_hw(spi1)->dr,
-        adc_samples_buf[0],
-        adc_buffer_samples_count,
-        false
-    );
-
-    dma_channel_set_irq1_enabled(spi_dma_chan, true);
-    irq_set_exclusive_handler(DMA_IRQ_1, spi_dma_isr);
-    irq_set_enabled(DMA_IRQ_1, true);
-    
-}
-
 void adc_initialize() {
     DEBUG("Initializing ADC\n");
     uint16_t sample_rate = 0;
-    size_t read_count = 0;
+    size_t read_count;
 
     // Read sampling rate from master
     read_count = spi_read(&sample_rate, 1);
@@ -338,15 +342,14 @@ void adc_initialize() {
 
     // init_audio_adc_dma();
     init_audio_sine_dma();
-    init_spi_dma();
-    
     
 #ifdef DEBUG_MODE
     adc_start_sampling_us = get_absolute_time();
 #endif
 
     audio_adc_dma_isr();
-    adc_run(true);
+    // adc_run(true);
+    streaming_enabled = 1;
 }
 
 void adc_deinit() {
@@ -368,16 +371,10 @@ void adc_deinit() {
     }
     dma_channel_unclaim(audio_adc_dma_chan);
     
-    // de-init spi dma
-    irq_set_enabled(DMA_IRQ_1, false);
-    irq_remove_handler(DMA_IRQ_1, spi_dma_isr);
-    dma_channel_set_irq0_enabled(spi_dma_chan, false);
-    dma_channel_unclaim(spi_dma_chan);
-    
     for (int i = 0; i < ADC_MAX_BUFFERS; i++) {
         free(adc_samples_buf[i]);
         adc_samples_buf[i] = NULL;
     }
     sinewave_enabled = 0;
-
+    streaming_enabled = 0;
 }

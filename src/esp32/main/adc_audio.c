@@ -35,11 +35,14 @@ static QueueHandle_t audio_ready_queue = NULL;
 static uint8_t adc_configured = 0;
 
 
-static uint8_t *audio_in_buf = NULL; // buffer holding ADC data
+static DRAM_ATTR uint8_t *audio_in_buf = NULL; // buffer holding ADC data
+static DRAM_ATTR int16_t *samples_buf = NULL;
 static uint8_t audio_in_sample_index = 0;
 static sample_rate_t adc_sample_rate;
-static size_t adc_buf_sample_count = 0;
-static RingbufHandle_t audio_in_rb = NULL;
+static DRAM_ATTR size_t adc_buf_sample_count = 0;
+static DRAM_ATTR RingbufHandle_t audio_in_rb = NULL;
+static DRAM_ATTR int16_t pcm_sample = 0;
+static DRAM_ATTR size_t sample_index = 0;
 static uint8_t initialized = 0;
 static uint8_t enabled = 0;
 
@@ -61,8 +64,25 @@ static void IRAM_ATTR adc_data_available_isr(void* arg) {
     xQueueSendFromISR(q, &signal_flag1, NULL);
 }
 
+static void IRAM_ATTR on_pcm_receive(spi_transaction_t *tx) {
+    pcm_sample = SPI_SWAP_DATA_RX(*(uint32_t *)tx->rx_data, 16);
+    samples_buf = (int16_t *) audio_in_buf;
+    sample_index = (size_t) tx->user;
+    
+    samples_buf[sample_index] = pcm_sample;
+    
+    if (sample_index < (adc_buf_sample_count - 1)) {
+        return;
+    }
+    
+    if (xRingbufferSendFromISR(audio_in_rb, audio_in_buf, adc_buf_sample_count * sizeof(int16_t), NULL) == pdTRUE) {
+        xQueueSendFromISR(audio_ready_queue, &signal_flag1, NULL);
+    }
+}
+
 static void adc_read_spi_data_task_handler(void *arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
+    int16_t sample = 0;
 
     while (1) {
         if (xQueueReceive(q, &signal_flag2, (TickType_t)portMAX_DELAY) != pdTRUE) {
@@ -76,7 +96,7 @@ static void adc_read_spi_data_task_handler(void *arg) {
             adc_config_spi_tx.rx_buffer = NULL;
             adc_config_spi_tx.tx_buffer = &data;
             adc_config_spi_tx.length = 16;
-            ESP_ERROR_CHECK(spi_device_transmit(spi, &adc_config_spi_tx));
+            ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &adc_config_spi_tx));
             adc_configured = 1;
 
             ESP_LOGI(AD_TAG, "Configured ADC");
@@ -84,31 +104,21 @@ static void adc_read_spi_data_task_handler(void *arg) {
         }
         
         start_us = esp_timer_get_time();
-        int16_t *buf = (int16_t *) audio_in_buf;
-        ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &adc_data_tx[0]));
-        int16_t sample = SPI_SWAP_DATA_RX(*(uint32_t *)adc_data_tx[0].rx_data, 16);
-        buf[audio_in_sample_index] = sample;
+
+        adc_data_tx[audio_in_sample_index].user = audio_in_sample_index;
+        ESP_ERROR_CHECK(spi_device_queue_trans(spi, &adc_data_tx[audio_in_sample_index], 0));
+        audio_in_sample_index++;
         
-        if (audio_in_sample_index < (adc_buf_sample_count - 1)) {
+        
+        now_us = esp_timer_get_time();
+        duration_us = now_us - start_us;
+        // ESP_LOGW(AD_TAG, "Duration %lld", duration_us);
+
+        if (audio_in_sample_index < adc_buf_sample_count) {
             continue;
         }
 
-        now_us = esp_timer_get_time();
-        duration_us = now_us - start_us;
-        xRingbufferSend(audio_in_rb, audio_in_buf, adc_buf_sample_count * sizeof(int16_t), 0);
-        xQueueSend(audio_ready_queue, &signal_flag2, 0);
-
-        // for (uint8_t i = 0; i < adc_buf_sample_count; i++) {
-        //     ESP_ERROR_CHECK(spi_device_polling_transmit(spi, &adc_data_tx[i]));
-        //     int16_t sample = SPI_SWAP_DATA_RX(*(uint32_t *)adc_data_tx[i].rx_data, 16);
-        //     buf[i] = sample;
-            
-        // }
-        // now_us = esp_timer_get_time();
-        // duration_us = now_us - start_us;
-        // xRingbufferSend(audio_in_rb, audio_in_buf, adc_buf_sample_count * sizeof(int16_t), 0);
-        
-        // xQueueSend(audio_ready_queue, &signal_flag2, 0);
+        audio_in_sample_index = 0;
     }
 }
 
@@ -210,6 +220,7 @@ void adc_audio_init_transport() {
     spi_dev_cfg.dummy_bits = 0;
     spi_dev_cfg.spics_io_num = ADC_CS_PIN;
     spi_dev_cfg.queue_size = ADC_SPI_QUEUE_SIZE;
+    spi_dev_cfg.post_cb = on_pcm_receive;
 
     ESP_ERROR_CHECK(spi_bus_initialize(VSPI_HOST, &spi_bus_cfg, 0));
     ESP_ERROR_CHECK(spi_bus_add_device(VSPI_HOST, &spi_dev_cfg, &spi));

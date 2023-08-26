@@ -14,7 +14,7 @@
 #define TAG "TEST"
 
 static sample_rate_t sample_rate;
-static uint8_t buf[512] = {0};
+static uint8_t buf[240] = {0};
 
 static void consume_audio_dac(void *arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
@@ -27,6 +27,7 @@ static void consume_audio_dac(void *arg) {
             continue;
         }
         
+        received = 0;
         adc_audio_receive(buf, &received, request_bytes);
         if (received != request_bytes) {
             continue;
@@ -42,6 +43,7 @@ void app_main(void) {
     assert(audio_queue != NULL);
     
     sample_rate = SAMPLE_RATE_16KHZ;
+    // sample_rate = SAMPLE_RATE_8KHZ;
 
     BaseType_t r = xTaskCreatePinnedToCore(consume_audio_dac, "consume_audio_dac", 4092, audio_queue, 10, NULL, 1);
     assert(r == pdPASS);
