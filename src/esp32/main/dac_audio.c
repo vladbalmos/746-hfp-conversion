@@ -79,7 +79,7 @@ static inline size_t dac_audio_get_buffer_size() {
 }
 
 static inline size_t dac_audio_get_rb_size() {
-    return 4 * dac_audio_get_buffer_size();
+    return 8 * dac_audio_get_buffer_size();
 }
 
 static void spi_transmit_buffer(uint8_t *buf, size_t size) {
@@ -141,17 +141,25 @@ static void consume_audio_task_handler(void *arg) {
     size_t received_size = 0;
     size_t request_buf_size = dac_audio_get_buffer_size();
     size_t ringbuf_max_size = dac_audio_get_rb_size();
-    size_t ringbuf_send_threshold = ringbuf_max_size / 2;
+    size_t ringbuf_send_threshold = ringbuf_max_size - (request_buf_size * 2);
     size_t ringbuf_free_size = 0;
+    size_t ringbuf_filled_size = 0;
+    uint8_t started = 0;
     
     while (1) {
         // Wait for buffer to be added to ring buffer
         ulTaskNotifyTakeIndexed(0, pdTRUE, portMAX_DELAY);
         
-        // ringbuf_free_size = xRingbufferGetCurFreeSize(rb);
-        // if (ringbuf_free_size > ringbuf_send_threshold) {
-        //     continue;
-        // }
+        ringbuf_free_size = xRingbufferGetCurFreeSize(rb);
+        ringbuf_filled_size = ringbuf_max_size - ringbuf_free_size;
+
+        if (!started) {
+            if (ringbuf_filled_size < ringbuf_send_threshold) {
+                continue;
+            }
+        }
+        
+        started = 1;
 
         buf_to_consume = xRingbufferReceiveUpTo(rb, &received_size, 0, request_buf_size);
         if (!received_size) {
@@ -252,7 +260,7 @@ void dac_audio_init(sample_rate_t sample_rate) {
     BaseType_t r = xTaskCreatePinnedToCore(consume_audio_task_handler, "consume_audio", 2048, audio_out_rb, 5, &audio_consumer_task, 0);
     assert(r == pdPASS);
 
-    r = xTaskCreatePinnedToCore(spi_transmit_task_handler, "spi_transmit", 2048, &spi_timer_callback_input, configMAX_PRIORITIES - 3, &spi_transmit_task, 1);
+    r = xTaskCreatePinnedToCore(spi_transmit_task_handler, "spi_transmit", 2048, &spi_timer_callback_input, configMAX_PRIORITIES - 1, &spi_transmit_task, 1);
     assert(r == pdPASS);
     
     memset(&spi_timer_callback_input, 0, sizeof(spi_timer_callback_input_t));
