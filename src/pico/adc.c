@@ -18,7 +18,7 @@
 // 
 // Data flow:
 // 1. Read sampling rate via SPI during initialization
-// 2. Configure ADC to write 120 samples via `audio_adc_dma_chan` to buffer
+// 2. Configure ADC to write samples via `audio_adc_dma_chan` to buffer
 // 3. `audio_adc_dma_chan` ISR gets triggered and starts `spi_dma_chan` transfer
 //    to stream buffer to SPI master. Goto step 2.
 
@@ -260,7 +260,7 @@ static void init_spi_dma() {
         &cfg,
         &spi_get_hw(spi1)->dr,
         adc_samples_buf[0],
-        120,
+        adc_buffer_samples_count,
         false
     );
 

@@ -4,7 +4,6 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "freertos/ringbuf.h"
-#include "freertos/semphr.h"
 #include "driver/spi_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -63,7 +62,6 @@ static void IRAM_ATTR adc_data_available_isr(void* arg) {
 
 static void adc_read_spi_data_task_handler(void *arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
-    SemaphoreHandle_t sem = NULL;
 
     while (1) {
         if (xQueueReceive(q, &signal_flag2, (TickType_t)portMAX_DELAY) != pdTRUE) {
@@ -84,9 +82,6 @@ static void adc_read_spi_data_task_handler(void *arg) {
             continue;
         }
         
-        sem = dac_get_sem();
-        xSemaphoreTake(sem, portMAX_DELAY);
-        
         start_us = esp_timer_get_time();
         int16_t *buf = (int16_t *) audio_in_buf;
         for (uint8_t i = 0; i < adc_buf_sample_count; i++) {
@@ -95,7 +90,6 @@ static void adc_read_spi_data_task_handler(void *arg) {
             buf[i] = sample;
             
         }
-        xSemaphoreGive(sem);
         now_us = esp_timer_get_time();
         duration_us = now_us - start_us;
         xRingbufferSend(audio_in_rb, audio_in_buf, adc_buf_sample_count * sizeof(int16_t), 0);

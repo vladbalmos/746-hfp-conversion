@@ -41,7 +41,7 @@ void app_main(void) {
     QueueHandle_t audio_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(audio_queue != NULL);
     
-    sample_rate = SAMPLE_RATE_16KHZ;
+    sample_rate = SAMPLE_RATE_8KHZ;
 
     BaseType_t r = xTaskCreatePinnedToCore(consume_audio_dac, "consume_audio_dac", 4092, audio_queue, 10, NULL, 1);
     assert(r == pdPASS);

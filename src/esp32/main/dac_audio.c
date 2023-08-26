@@ -3,7 +3,6 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
 #include "freertos/queue.h"
 #include "freertos/ringbuf.h"
 #include "driver/spi_master.h"
@@ -60,7 +59,6 @@ static spi_device_handle_t spi;
 static spi_bus_config_t spi_bus_cfg;
 static spi_device_interface_config_t spi_dev_cfg;
 static spi_transaction_t spi_transaction;
-static SemaphoreHandle_t sem;
 
 /**
  * Return the buffer size based on current sample rate
@@ -154,7 +152,6 @@ static void consume_audio_task_handler(void *arg) {
             continue;
         }
         
-        xSemaphoreTake(sem, portMAX_DELAY);
         // Schedule transmit transactions
         // ESP_LOGW(DA_TAG, "Starting timer, waiting to finish");
         spi_transmit_buffer(buf_to_consume, request_buf_size);
@@ -162,7 +159,6 @@ static void consume_audio_task_handler(void *arg) {
         // Wait for all spi transactions to finish
         ulTaskNotifyTakeIndexed(1, pdTRUE, portMAX_DELAY);
         // ESP_LOGW(DA_TAG, "Timer finished");
-        xSemaphoreGive(sem);
         
         // Put back the buffer into the ringbuffer
         vRingbufferReturnItem(audio_out_rb, buf_to_consume);
@@ -214,18 +210,11 @@ void dac_audio_enable(uint8_t status) {
     enabled = 0;
 }
 
-SemaphoreHandle_t dac_get_sem() {
-    return sem;
-}
-
 void dac_audio_init(sample_rate_t sample_rate) {
     if (initialized) {
         return;
     }
     
-    sem = xSemaphoreCreateBinary();
-    xSemaphoreGive(sem);
-
     memset(&spi_transaction, 0, sizeof(spi_transaction_t));
     
     // Pre-fill non-volatile tx fields
@@ -333,6 +322,5 @@ void dac_audio_deinit() {
     vRingbufferDelete(audio_out_rb);
     audio_out_rb = NULL;
 
-    vSemaphoreDelete(sem);
     initialized = 0;
 }
