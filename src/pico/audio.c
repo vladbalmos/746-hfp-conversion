@@ -16,20 +16,25 @@
 #include "audio.h"
 #include "debug.h"
 
-// SPI Slave device
-// Reading and writing to SPI is done after pulling `data_ready_pin` HIGH
-// Once spi transfer completes, the `data_ready_pin` is pulled LOW
-// 
+// I2C Slave device (address: 32)
+// ----------------
 // Data flow:
-// 1. Read sampling rate via SPI during initialization
-// 2. Configure ADC to write samples via `audio_adc_dma_chan` to buffer
-// 3. `audio_adc_dma_chan` ISR gets triggered and starts `spi_dma_chan` transfer
-//    to stream buffer to SPI master. Goto step 2.
+// 1. Read sampling rate via I2C during initialization
+// 2. Based on received sample rate, determine appropriate buffer sizes & samples count
+// 3. Configure ADC to continuous write samples via `audio_adc_dma_chan` to buffer
+// 4. `audio_adc_dma_chan` ISR gets triggered after each sample set and adds samples buffer to transmission queue
+// 5. Main loop polls transmission queue and notifies I2C master via `data_ready_pin` pulling it high
+//    when samples are available
+// 6. Master reads available PCM samples
+// 7. Master sends playback PCM samples for DAC. Samples are added to the appropriate DAC buffer
+// 8. Audio samples for playback are sent to DAC through SPI using `audio_dac_dma_chan`
+// 9. GOTO step 5
 
 // I2C
 #define I2C_BAUDRATE 1000000
 #define I2C_SDA_PIN 12
 #define I2C_SCL_PIN 13
+#define I2C_ADDRESS 32
 
 // SPI
 #define SPI_BAUDRATE I2C_BAUDRATE
@@ -200,7 +205,7 @@ static void i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
     }
 }
 
-void audio_transport_initialize(uint8_t gpio_ready_pin) {
+void audio_transport_init(uint8_t gpio_ready_pin) {
     DEBUG("Initializing audio transport\n");
     data_ready_pin = gpio_ready_pin;
 
@@ -214,7 +219,7 @@ void audio_transport_initialize(uint8_t gpio_ready_pin) {
     gpio_pull_up(I2C_SCL_PIN);
     
     i2c_init(i2c0, I2C_BAUDRATE);
-    i2c_slave_init(i2c0, 32, &i2c_slave_handler);
+    i2c_slave_init(i2c0, I2C_ADDRESS, &i2c_slave_handler);
     DEBUG("Initialized I2C\n");
 
     // SPI
@@ -359,7 +364,7 @@ static void init_audio_dac_dma() {
     DEBUG("Initialized DAC\n");
 }
 
-void audio_initialize() {
+void audio_init() {
     DEBUG("Initializing ADC\n");
     queue_init(&i2c_msg_q, sizeof(uint8_t), 1);
 
