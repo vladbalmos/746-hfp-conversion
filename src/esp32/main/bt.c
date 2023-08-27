@@ -553,6 +553,8 @@ static void bt_init_stack() {
 
     /* set discoverable and connectable mode, wait to be connected */
     esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
+    
+    audio_init_transport();
 }
 
 static void bt_msg_handler(void *arg) {
@@ -604,8 +606,6 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     bt_msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
     assert(bt_msg_queue != NULL);
     
-    audio_init_transport();
-    
     bt_audio_data_available_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(bt_audio_data_available_queue != NULL);
 
@@ -613,7 +613,7 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created audio handler task");
 
-    r = xTaskCreatePinnedToCore(bt_msg_handler, "bt_msg_handler", 8192, NULL, 5, NULL, 0);
+    r = xTaskCreatePinnedToCore(bt_msg_handler, "bt_msg_handler", 8192, NULL, 5, NULL, 1);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created bluetooth task");
     

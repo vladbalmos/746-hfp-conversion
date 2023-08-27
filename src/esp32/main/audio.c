@@ -13,6 +13,7 @@
 #define AD_TAG "AD"
 
 #define I2C_PORT 0
+#define I2C_SLAVE_ADDRESS 32
 
 #define AUDIO_ENABLE_PIN GPIO_NUM_13
 #define AUDIO_DATA_READY_PIN GPIO_NUM_25
@@ -32,6 +33,9 @@ static uint8_t *audio_out_buf = NULL; // buffer holding ADC data
 static uint8_t *audio_out_resample_buf = NULL; // buffer holding ADC data
 static RingbufHandle_t audio_in_rb = NULL;
 static RingbufHandle_t audio_out_rb = NULL;
+
+uint8_t *i2c_tx_buffer = NULL;
+size_t i2c_tx_buffer_size = 0;
 
 static uint8_t initialized = 0;
 static uint8_t configured = 0;
@@ -65,6 +69,8 @@ static void audio_i2c_data_task_handler(void *arg) {
     size_t buf_size = audio_get_buffer_size();
     size_t received = 0;
     uint8_t *tmp_buf = NULL;
+    i2c_cmd_handle_t i2c_cmd_handle;
+    esp_err_t err = ESP_OK;
 
     while (1) {
         if (!enabled) {
@@ -80,14 +86,14 @@ static void audio_i2c_data_task_handler(void *arg) {
         
         if (!configured) {
             ESP_LOGW(AD_TAG, "setting sample rate to: %d", audio_sample_rate);
-            ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, 32, (uint8_t *) &audio_sample_rate, 1, portMAX_DELAY));
+            ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, (uint8_t *) &audio_sample_rate, 1, portMAX_DELAY));
             configured = 1;
             ESP_LOGI(AD_TAG, "Configured ADC");
             continue;
         }
         
         // Get audio data from ADC
-        if (i2c_master_read_from_device(I2C_PORT, 32, audio_in_buf, buf_size, portMAX_DELAY) == ESP_OK) {
+        if (i2c_master_read_from_device(I2C_PORT, I2C_SLAVE_ADDRESS, audio_in_buf, buf_size, portMAX_DELAY) == ESP_OK) {
             if (xRingbufferSend(audio_in_rb, audio_in_buf, buf_size, 0) == pdTRUE) {
                 xQueueSend(audio_ready_queue, &signal_flag1, 0);
             }
@@ -108,9 +114,7 @@ static void audio_i2c_data_task_handler(void *arg) {
         memcpy(audio_out_buf, tmp_buf, received);
         received = 0;
         vRingbufferReturnItem(audio_out_rb, tmp_buf);
-        assert(tmp_buf != NULL);
-        assert(audio_out_buf != NULL);
-        i2c_master_write_to_device(I2C_PORT, 32, audio_out_buf, buf_size, portMAX_DELAY);
+        ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, 32, audio_out_buf, buf_size, portMAX_DELAY));
     }
 }
 
@@ -187,7 +191,7 @@ void audio_init_transport() {
     QueueHandle_t audio_read_notif_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(audio_read_notif_queue != NULL);
 
-    BaseType_t r = xTaskCreatePinnedToCore(audio_i2c_data_task_handler, "i2c_data_task", 8184, audio_read_notif_queue, configMAX_PRIORITIES - 3, NULL, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(audio_i2c_data_task_handler, "i2c_data_task", 4048, audio_read_notif_queue, configMAX_PRIORITIES - 3, NULL, 1);
     assert(r == pdPASS);
 
     // Configure enable pin
@@ -253,6 +257,10 @@ void audio_init(sample_rate_t sample_rate, QueueHandle_t audio_ready_q) {
 
     audio_out_rb = xRingbufferCreate(audio_rb_size, RINGBUF_TYPE_BYTEBUF);
     assert(audio_out_rb != NULL);
+    
+    i2c_tx_buffer_size = I2C_LINK_RECOMMENDED_SIZE(audio_buf_size / 2);
+    i2c_tx_buffer = malloc(i2c_tx_buffer_size);
+    assert(i2c_tx_buffer);
 
     initialized = 1;
 }
@@ -280,6 +288,10 @@ void audio_deinit() {
 
     free(audio_out_resample_buf);
     audio_out_resample_buf = NULL;
+
+    free(i2c_tx_buffer);
+    i2c_tx_buffer = NULL;
+    i2c_tx_buffer_size = 0;
 
     configured = 0;
     initialized = 0;
