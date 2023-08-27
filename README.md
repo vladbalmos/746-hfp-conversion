@@ -29,7 +29,7 @@ My initial plan was to use the ESP32's ADC & DAC simultaneous, but the I've run 
 
 In a previous iteration of the project, both the Pico and the external DAC were connected to the ESP32 via SPI, but it struggled to keep a constant rate of sending/receiving PCM samples during an active call because each PCM sample required its own SPI transaction (both the Pico and the TLC5615 support only 2 byte transactions) - this cause horrible audio on both ends.
 
-## ADC control & protocol
+## Audio transmission
 The Pico is configured as a slave I2C device with an additional two GPIO input pins configured as an ENABLE pin controlled by the ESP32 and a DATA READY pin which is toggled HIGH by the Pico when samples are avalable from the ADC.
 Basic data flow between ESP32 and PICO:
 
