@@ -67,6 +67,11 @@ static void audio_i2c_data_task_handler(void *arg) {
     uint8_t *tmp_buf = NULL;
 
     while (1) {
+        if (!enabled) {
+            received = 0;
+            vTaskDelay(1);
+            continue;
+        }
 
         if (xQueueReceive(q, &signal_flag2, (TickType_t)portMAX_DELAY) != pdTRUE) {
             continue;
@@ -80,11 +85,6 @@ static void audio_i2c_data_task_handler(void *arg) {
             ESP_LOGI(AD_TAG, "Configured ADC");
             continue;
         }
-
-        if (!enabled) {
-            vTaskDelay(1);
-            continue;
-        }
         
         // Get audio data from ADC
         if (i2c_master_read_from_device(I2C_PORT, 32, audio_in_buf, buf_size, portMAX_DELAY) == ESP_OK) {
@@ -95,19 +95,22 @@ static void audio_i2c_data_task_handler(void *arg) {
         
         // Write audio data to DAC
         tmp_buf = xRingbufferReceiveUpTo(audio_out_rb, &received, 0, buf_size);
-        if (!received) {
+        if (tmp_buf == NULL) {
             continue;
         }
 
         if (received && (received != buf_size)) {
+            received = 0;
             vRingbufferReturnItem(audio_out_rb, tmp_buf);
             continue;
         }
         
         memcpy(audio_out_buf, tmp_buf, received);
-        vRingbufferReturnItem(audio_out_rb, tmp_buf);
-        i2c_master_write_to_device(I2C_PORT, 32, audio_out_buf, buf_size, portMAX_DELAY);
         received = 0;
+        vRingbufferReturnItem(audio_out_rb, tmp_buf);
+        assert(tmp_buf != NULL);
+        assert(audio_out_buf != NULL);
+        i2c_master_write_to_device(I2C_PORT, 32, audio_out_buf, buf_size, portMAX_DELAY);
     }
 }
 
@@ -143,7 +146,7 @@ void audio_send(const uint8_t *buf, size_t size) {
     uint8_t sample_count = size / 2;
     
     for (int i = 0; i < sample_count; i++) {
-        dst[i] = (src[i] - INT16_MIN) >> 4;
+        dst[i] = ((int16_t)(src[i] * 0.3) - INT16_MIN) >> 4;
     }
     
     xRingbufferSend(audio_out_rb, audio_out_resample_buf, size, 0);
@@ -165,14 +168,17 @@ void audio_enable(uint8_t status) {
     
     if (status) {
         ESP_LOGW(AD_TAG, "Enabling ADC");
-        gpio_set_level(AUDIO_ENABLE_PIN, 1);
         enabled = 1;
+        gpio_set_level(AUDIO_ENABLE_PIN, 1);
         return;
     }
 
     ESP_LOGW(AD_TAG, "Disabling ADC");
     gpio_set_level(AUDIO_ENABLE_PIN, 0);
+    i2c_reset_tx_fifo(I2C_PORT);
+    i2c_reset_rx_fifo(I2C_PORT);
     enabled = 0;
+    configured = 0;
 }
 
 void audio_init_transport() {
@@ -181,7 +187,7 @@ void audio_init_transport() {
     QueueHandle_t audio_read_notif_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(audio_read_notif_queue != NULL);
 
-    BaseType_t r = xTaskCreatePinnedToCore(audio_i2c_data_task_handler, "i2c_data_task", 4092, audio_read_notif_queue, 10, NULL, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(audio_i2c_data_task_handler, "i2c_data_task", 8184, audio_read_notif_queue, configMAX_PRIORITIES - 3, NULL, 1);
     assert(r == pdPASS);
 
     // Configure enable pin

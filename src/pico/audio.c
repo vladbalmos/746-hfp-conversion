@@ -201,8 +201,10 @@ static void i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
 }
 
 void audio_transport_initialize(uint8_t gpio_ready_pin) {
+    DEBUG("Initializing audio transport\n");
     data_ready_pin = gpio_ready_pin;
 
+    // I2C
     gpio_init(I2C_SDA_PIN);
     gpio_set_function(I2C_SDA_PIN, GPIO_FUNC_I2C);
     gpio_pull_up(I2C_SDA_PIN);
@@ -213,10 +215,22 @@ void audio_transport_initialize(uint8_t gpio_ready_pin) {
     
     i2c_init(i2c0, I2C_BAUDRATE);
     i2c_slave_init(i2c0, 32, &i2c_slave_handler);
+    DEBUG("Initialized I2C\n");
+
+    // SPI
+    spi_init(spi0, SPI_BAUDRATE);
+    spi_set_format(spi0, 16, 0, 0, SPI_MSB_FIRST);
+    
+    gpio_set_function(SPI_DAC_TX_PIN, GPIO_FUNC_SPI);
+    gpio_set_function(SPI_DAC_SCLK_PIN, GPIO_FUNC_SPI);
+    gpio_set_function(SPI_DAC_CS_PIN, GPIO_FUNC_SPI);
+
+    // Silence please
+    gpio_put(SPI_DAC_CS_PIN, 1);
+    DEBUG("Initialized SPI\n");
 }
 
 static void init_audio_sine_dma() {
-    DEBUG("Initializing sine wave\n");
     sinewave_enabled = 1;
     // Configure sinewave transfer DMA channel
     audio_adc_dma_chan = dma_claim_unused_channel(true);
@@ -261,10 +275,11 @@ static void init_audio_sine_dma() {
     dma_channel_set_irq0_enabled(audio_adc_dma_chan, true);
     irq_set_exclusive_handler(DMA_IRQ_0, audio_adc_dma_isr);
     irq_set_enabled(DMA_IRQ_0, true);
+
+    DEBUG("Initialized sine wave\n");
 }
 
 static void init_audio_adc_dma() {
-    DEBUG("Initializing ADC\n");
     adc_init();
 
     // Configure ADC DMA channel for sampling the audio signal
@@ -309,23 +324,12 @@ static void init_audio_adc_dma() {
     dma_channel_set_irq0_enabled(audio_adc_dma_chan, true);
     irq_set_exclusive_handler(DMA_IRQ_0, audio_adc_dma_isr);
     irq_set_enabled(DMA_IRQ_0, true);
+    DEBUG("Initialized ADC\n");
 }
 
 static void init_audio_dac_dma() {
-    DEBUG("Initializing SPI DAC\n");
-    // Init spi port and baud rate
-    spi_init(spi0, SPI_BAUDRATE);
-    spi_set_format(spi0, 16, 0, 0, SPI_MSB_FIRST);
-    
-    gpio_set_function(SPI_DAC_TX_PIN, GPIO_FUNC_SPI);
-    gpio_set_function(SPI_DAC_SCLK_PIN, GPIO_FUNC_SPI);
-    gpio_set_function(SPI_DAC_CS_PIN, GPIO_FUNC_SPI);
-
-    gpio_put(SPI_DAC_CS_PIN, 1);
-    
     audio_dac_dma_chan = dma_claim_unused_channel(true);
 
-    // Configure data channel
     dma_channel_config cfg = dma_channel_get_default_config(audio_dac_dma_chan);
 
     channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
@@ -352,6 +356,7 @@ static void init_audio_dac_dma() {
     irq_set_enabled(DMA_IRQ_1, true);
 
     gpio_put(SPI_DAC_CS_PIN, 0);
+    DEBUG("Initialized DAC\n");
 }
 
 void audio_initialize() {
@@ -422,23 +427,37 @@ void audio_initialize() {
 }
 
 void audio_deinit() {
-    DEBUG("De-initializing ADC\n");
+    DEBUG("De-initializing audio\n");
     
-    if (!sinewave_enabled) {
-        adc_fifo_drain();
-    }
-    
-    dma_channel_abort(audio_adc_dma_chan);
-
-    // de-init adc dma
+    // De-init ADC DMA
+    dma_channel_set_irq0_enabled(audio_adc_dma_chan, false);
     irq_set_enabled(DMA_IRQ_0, false);
     irq_remove_handler(DMA_IRQ_0, audio_adc_dma_isr);
-    dma_channel_set_irq0_enabled(audio_adc_dma_chan, false);
-    if (dma_timer_is_claimed(AUDIO_SINEWAVE_DMA_TIMER)) {
-        dma_timer_unclaim(AUDIO_SINEWAVE_DMA_TIMER);
+    dma_channel_abort(audio_adc_dma_chan);
+    if (!sinewave_enabled) {
+        adc_run(false);
+        adc_fifo_drain();
+        DEBUG("Drained ADC fifo\n");
     }
     dma_channel_unclaim(audio_adc_dma_chan);
+    DEBUG("Disabled ADC DMA\n");
+
+    // De-init DAC DMA
+    dma_channel_set_irq0_enabled(audio_dac_dma_chan, false);
+    irq_set_enabled(DMA_IRQ_1, false);
+    irq_remove_handler(DMA_IRQ_1, audio_dac_dma_isr);
+    dma_channel_abort(audio_dac_dma_chan);
+    dma_channel_unclaim(audio_dac_dma_chan);
+    DEBUG("Disabled DAC DMA\n");
+
+    if (dma_timer_is_claimed(AUDIO_SINEWAVE_DMA_TIMER)) {
+        dma_timer_unclaim(AUDIO_SINEWAVE_DMA_TIMER);
+        DEBUG("Unclaimed sinewave DMA timer\n");
+    }
     
+    // Free buffers
+    queue_free(&i2c_msg_q);
+
     for (int i = 0; i < MAX_BUFFERS; i++) {
         free(adc_samples_buf[i]);
         adc_samples_buf[i] = NULL;
@@ -446,8 +465,34 @@ void audio_deinit() {
         free(dac_samples_buf[i]);
         dac_samples_buf[i] = NULL;
     }
+    
+    free(i2c_data_out_buf);
+    i2c_data_out_buf = NULL;
+    
+    sinewave_buf = NULL;
+    DEBUG("Freed buffers\n");
+
+    adc_samples_buf_index = -1;
+    dac_samples_buf_index = 0;
+    dac_current_buf_index_streaming = -1;
+
+    buffer_samples_count = 0;
+    buffer_size = 0;
+
     audio_sample_rate = SAMPLE_RATE_NONE;
     dac_streaming = 0;
     sinewave_enabled = 0;
     configured = 0;
+    DEBUG("Reset counters and flags\n");
+
+    gpio_put(data_ready_pin, 0);
+    gpio_put(SPI_DAC_CS_PIN, 1);
+    DEBUG("Reset signal pins\n");
+    
+    // Drain I2C fifo
+    size_t bytes_to_discard = i2c_get_read_available(i2c0);
+    for (int i = 0; i < bytes_to_discard; i++) {
+        i2c_read_byte_raw(i2c0);
+    }
+    DEBUG("Discarded %d bytes of I2C data\n", bytes_to_discard);
 }
