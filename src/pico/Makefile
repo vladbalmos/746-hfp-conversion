@@ -1,5 +1,5 @@
 # pico-install.sh is actual a wrapper script for the following command:
-# openocd -f interface/cmsis-dap.cfg -c "adapter speed 5000" -f target/rp2040.cfg -s tcl -c "program adc_main.elf verify reset exit"
+# openocd -f interface/cmsis-dap.cfg -c "adapter speed 5000" -f target/rp2040.cfg -s tcl -c "program audio_main.elf verify reset exit"
 
 .PHONY: build clean debug install-debug install
 
@@ -17,7 +17,7 @@ clean:
 	rm -rf debug
 
 install: build
-	cd build && pico-install.sh adc_main
+	cd build && pico-install.sh audio_main
 
 install-debug: debug
-	cd debug && pico-install.sh adc_main
+	cd debug && pico-install.sh audio_main

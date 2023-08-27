@@ -4,11 +4,12 @@
 #include "hardware/adc.h"
 #include "hardware/clocks.h"
 #include "hardware/i2c.h"
+#include "hardware/spi.h"
+#include "hardware/dma.h"
 #include "pico/stdlib.h"
 #include "pico/util/queue.h"
 #include "pico/multicore.h"
 #include "pico/i2c_slave.h"
-#include "hardware/dma.h"
 #include "sample_rate.h"
 #include "sine_16000_666.h"
 #include "sine_8000_666.h"
@@ -25,9 +26,16 @@
 // 3. `audio_adc_dma_chan` ISR gets triggered and starts `spi_dma_chan` transfer
 //    to stream buffer to SPI master. Goto step 2.
 
+// I2C
 #define I2C_BAUDRATE 1000000
-#define SDA_PIN 12
-#define SCL_PIN 13
+#define I2C_SDA_PIN 12
+#define I2C_SCL_PIN 13
+
+// SPI
+#define SPI_BAUDRATE I2C_BAUDRATE
+#define SPI_DAC_CS_PIN 17
+#define SPI_DAC_SCLK_PIN 18
+#define SPI_DAC_TX_PIN 19
 
 #define ADC_CLOCK_SPEED_HZ 48 * 1000 * 1000
 #define MAX_BUFFERS 8
@@ -38,6 +46,7 @@
 static uint8_t data_ready_pin;
 
 static int audio_adc_dma_chan;
+static int audio_dac_dma_chan;
 
 static sample_rate_t audio_sample_rate;
 static int16_t *adc_samples_buf[MAX_BUFFERS] = {0};
@@ -45,8 +54,8 @@ static uint8_t *i2c_data_out_buf = NULL;
 static int8_t adc_samples_buf_index = -1;
 
 static int16_t *dac_samples_buf[MAX_BUFFERS] = {0};
-static int8_t dac_samples_buf_index = 0;
-static int8_t dac_current_buf_index_streaming = 0;
+static uint8_t dac_samples_buf_index = 0;
+static int8_t dac_current_buf_index_streaming = -1;
 static int8_t dac_streaming = 0;
 
 static size_t buffer_samples_count = 0;
@@ -61,9 +70,37 @@ static uint8_t configured = 0;
 static uint64_t sent_adc_counter = 0;
 static absolute_time_t adc_start_sampling_us;
 static int64_t adc_sampling_duration_us = 0;
+
+static uint64_t sent_dac_counter = 0;
+static absolute_time_t dac_start_sampling_us;
+static int64_t dac_sampling_duration_us = 0;
+
 #endif
 
 static void audio_dac_dma_isr() {
+#ifdef DEBUG_MODE
+    absolute_time_t now;
+
+    if (sent_dac_counter) {
+        now = get_absolute_time();
+        dac_sampling_duration_us = absolute_time_diff_us(dac_start_sampling_us, now);
+        dac_start_sampling_us = now;
+    }
+#endif
+    dma_hw->ints1 = 1u << audio_dac_dma_chan;
+    
+    dac_current_buf_index_streaming++;
+    if (dac_current_buf_index_streaming >= MAX_BUFFERS) {
+        dac_current_buf_index_streaming = 0;
+    }
+
+#ifdef DEBUG_MODE
+        if (sent_dac_counter++ % 125 == 0 && dac_current_buf_index_streaming > -1) {
+            DEBUG("DAC Data transfered. Sampling duration: %lld us.\n", dac_sampling_duration_us);
+        }
+#endif
+    // dma_channel_set_write_addr(audio_dac_dma_chan, dac_samples_buf[dac_current_buf_index_streaming], true);
+    dma_channel_set_read_addr(audio_dac_dma_chan, dac_samples_buf[dac_current_buf_index_streaming], true);
 }
 
 static void audio_adc_dma_isr() {
@@ -166,19 +203,20 @@ static void i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
 void audio_transport_initialize(uint8_t gpio_ready_pin) {
     data_ready_pin = gpio_ready_pin;
 
-    gpio_init(SDA_PIN);
-    gpio_set_function(SDA_PIN, GPIO_FUNC_I2C);
-    gpio_pull_up(SDA_PIN);
+    gpio_init(I2C_SDA_PIN);
+    gpio_set_function(I2C_SDA_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(I2C_SDA_PIN);
 
-    gpio_init(SCL_PIN);
-    gpio_set_function(SCL_PIN, GPIO_FUNC_I2C);
-    gpio_pull_up(SCL_PIN);
+    gpio_init(I2C_SCL_PIN);
+    gpio_set_function(I2C_SCL_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(I2C_SCL_PIN);
     
     i2c_init(i2c0, I2C_BAUDRATE);
     i2c_slave_init(i2c0, 32, &i2c_slave_handler);
 }
 
 static void init_audio_sine_dma() {
+    DEBUG("Initializing sine wave\n");
     sinewave_enabled = 1;
     // Configure sinewave transfer DMA channel
     audio_adc_dma_chan = dma_claim_unused_channel(true);
@@ -226,6 +264,7 @@ static void init_audio_sine_dma() {
 }
 
 static void init_audio_adc_dma() {
+    DEBUG("Initializing ADC\n");
     adc_init();
 
     // Configure ADC DMA channel for sampling the audio signal
@@ -270,6 +309,49 @@ static void init_audio_adc_dma() {
     dma_channel_set_irq0_enabled(audio_adc_dma_chan, true);
     irq_set_exclusive_handler(DMA_IRQ_0, audio_adc_dma_isr);
     irq_set_enabled(DMA_IRQ_0, true);
+}
+
+static void init_audio_dac_dma() {
+    DEBUG("Initializing SPI DAC\n");
+    // Init spi port and baud rate
+    spi_init(spi0, SPI_BAUDRATE);
+    spi_set_format(spi0, 16, 0, 0, SPI_MSB_FIRST);
+    
+    gpio_set_function(SPI_DAC_TX_PIN, GPIO_FUNC_SPI);
+    gpio_set_function(SPI_DAC_SCLK_PIN, GPIO_FUNC_SPI);
+    gpio_set_function(SPI_DAC_CS_PIN, GPIO_FUNC_SPI);
+
+    gpio_put(SPI_DAC_CS_PIN, 1);
+    
+    audio_dac_dma_chan = dma_claim_unused_channel(true);
+
+    // Configure data channel
+    dma_channel_config cfg = dma_channel_get_default_config(audio_dac_dma_chan);
+
+    channel_config_set_transfer_data_size(&cfg, DMA_SIZE_16);
+    channel_config_set_read_increment(&cfg, true);
+    channel_config_set_write_increment(&cfg, false);
+
+    if (sinewave_enabled) {
+        channel_config_set_dreq(&cfg, dma_get_timer_dreq(AUDIO_SINEWAVE_DMA_TIMER));
+    } else {
+        channel_config_set_dreq(&cfg, DREQ_ADC);
+    }
+    
+    dma_channel_configure(
+        audio_dac_dma_chan,
+        &cfg,
+        &spi_get_hw(spi0)->dr,
+        NULL,
+        buffer_samples_count,
+        false
+    );
+
+    dma_channel_set_irq1_enabled(audio_dac_dma_chan, true);
+    irq_set_exclusive_handler(DMA_IRQ_1, audio_dac_dma_isr);
+    irq_set_enabled(DMA_IRQ_1, true);
+
+    gpio_put(SPI_DAC_CS_PIN, 0);
 }
 
 void audio_initialize() {
@@ -328,6 +410,7 @@ void audio_initialize() {
 
     init_audio_adc_dma();
     // init_audio_sine_dma();
+    init_audio_dac_dma();
     
 #ifdef DEBUG_MODE
     adc_start_sampling_us = get_absolute_time();

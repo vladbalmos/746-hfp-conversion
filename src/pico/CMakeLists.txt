@@ -34,6 +34,7 @@ target_link_libraries(audio_main
     hardware_dma
     hardware_sync
     hardware_i2c
+    hardware_spi
     )
 
 if(DEFINED ENV{DEBUG_MODE})

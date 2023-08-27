@@ -27,7 +27,9 @@
 static sample_rate_t audio_sample_rate;
 static QueueHandle_t audio_ready_queue = NULL;
 
-static DRAM_ATTR uint8_t *audio_in_buf = NULL; // buffer holding ADC data
+static uint8_t *audio_in_buf = NULL; // buffer holding ADC data
+static uint8_t *audio_out_buf = NULL; // buffer holding ADC data
+static uint8_t *audio_out_resample_buf = NULL; // buffer holding ADC data
 static RingbufHandle_t audio_in_rb = NULL;
 static RingbufHandle_t audio_out_rb = NULL;
 
@@ -60,29 +62,52 @@ static void IRAM_ATTR audio_data_available_isr(void* arg) {
 
 static void audio_i2c_data_task_handler(void *arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
-    int16_t notified = 0;
     size_t buf_size = audio_get_buffer_size();
+    size_t received = 0;
+    uint8_t *tmp_buf = NULL;
 
     while (1) {
+
         if (xQueueReceive(q, &signal_flag2, (TickType_t)portMAX_DELAY) != pdTRUE) {
             continue;
         }
         buf_size = audio_get_buffer_size();
         
         if (!configured) {
+            ESP_LOGW(AD_TAG, "setting sample rate to: %d", audio_sample_rate);
             ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, 32, (uint8_t *) &audio_sample_rate, 1, portMAX_DELAY));
             configured = 1;
             ESP_LOGI(AD_TAG, "Configured ADC");
             continue;
         }
+
+        if (!enabled) {
+            vTaskDelay(1);
+            continue;
+        }
         
-        if (i2c_master_read_from_device(I2C_PORT, 32, audio_in_buf, buf_size, portMAX_DELAY) != ESP_OK) {
+        // Get audio data from ADC
+        if (i2c_master_read_from_device(I2C_PORT, 32, audio_in_buf, buf_size, portMAX_DELAY) == ESP_OK) {
+            if (xRingbufferSend(audio_in_rb, audio_in_buf, buf_size, 0) == pdTRUE) {
+                xQueueSend(audio_ready_queue, &signal_flag1, 0);
+            }
+        }
+        
+        // Write audio data to DAC
+        tmp_buf = xRingbufferReceiveUpTo(audio_out_rb, &received, 0, buf_size);
+        if (!received) {
             continue;
         }
 
-        if (xRingbufferSend(audio_in_rb, audio_in_buf, buf_size, 0) == pdTRUE) {
-            xQueueSend(audio_ready_queue, &signal_flag1, 0);
+        if (received && (received != buf_size)) {
+            vRingbufferReturnItem(audio_out_rb, tmp_buf);
+            continue;
         }
+        
+        memcpy(audio_out_buf, tmp_buf, received);
+        vRingbufferReturnItem(audio_out_rb, tmp_buf);
+        i2c_master_write_to_device(I2C_PORT, 32, audio_out_buf, buf_size, portMAX_DELAY);
+        received = 0;
     }
 }
 
@@ -112,7 +137,17 @@ void audio_send(const uint8_t *buf, size_t size) {
         return;
     }
     
-    xRingbufferSend(audio_out_rb, buf, size, 0);
+    int16_t *src = (int16_t *) buf;
+    uint16_t *dst = (uint16_t *) audio_out_resample_buf;
+    
+    uint8_t sample_count = size / 2;
+    
+    for (int i = 0; i < sample_count; i++) {
+        dst[i] = (src[i] - INT16_MIN) >> 4;
+    }
+    
+    xRingbufferSend(audio_out_rb, audio_out_resample_buf, size, 0);
+    memset(audio_out_resample_buf, '\0', size);
 }
 
 sample_rate_t audio_get_sample_rate() {
@@ -146,7 +181,7 @@ void audio_init_transport() {
     QueueHandle_t audio_read_notif_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(audio_read_notif_queue != NULL);
 
-    BaseType_t r = xTaskCreatePinnedToCore(audio_i2c_data_task_handler, "i2c_data_task", 4092, audio_read_notif_queue, 5, NULL, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(audio_i2c_data_task_handler, "i2c_data_task", 4092, audio_read_notif_queue, 10, NULL, 1);
     assert(r == pdPASS);
 
     // Configure enable pin
@@ -196,6 +231,14 @@ void audio_init(sample_rate_t sample_rate, QueueHandle_t audio_ready_q) {
     audio_in_buf = malloc(audio_buf_size);
     assert(audio_in_buf != NULL);
     memset(audio_in_buf, '\0', audio_buf_size);
+
+    audio_out_buf = malloc(audio_buf_size);
+    assert(audio_out_buf != NULL);
+    memset(audio_out_buf, '\0', audio_buf_size);
+
+    audio_out_resample_buf = malloc(audio_buf_size);
+    assert(audio_out_resample_buf != NULL);
+    memset(audio_out_resample_buf, '\0', audio_buf_size);
     
     size_t audio_rb_size = audio_get_rb_size();
     
@@ -225,6 +268,12 @@ void audio_deinit() {
     
     free(audio_in_buf);
     audio_in_buf = NULL;
+
+    free(audio_out_buf);
+    audio_out_buf = NULL;
+
+    free(audio_out_resample_buf);
+    audio_out_resample_buf = NULL;
 
     configured = 0;
     initialized = 0;

@@ -2,3 +2,4 @@ build
 debug
 bt-debug
 .vscode
+*.zip

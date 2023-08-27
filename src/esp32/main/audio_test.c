@@ -5,8 +5,7 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 #include "driver/gpio.h"
-#include "adc_audio.h"
-#include "dac_audio.h"
+#include "audio.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "sample_rate.h"
@@ -16,7 +15,7 @@
 static sample_rate_t sample_rate;
 static uint8_t buf[240] = {0};
 
-static void consume_audio_dac(void *arg) {
+static void consume_audio(void *arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
     uint8_t flag = 0;
     size_t request_bytes = (sample_rate == SAMPLE_RATE_16KHZ) ? 240 : 120;
@@ -28,11 +27,11 @@ static void consume_audio_dac(void *arg) {
         }
         
         received = 0;
-        adc_audio_receive(buf, &received, request_bytes);
+        audio_receive(buf, &received, request_bytes);
         if (received != request_bytes) {
             continue;
         }
-        dac_audio_send(buf, request_bytes);
+        audio_send(buf, request_bytes);
     }
 }
 
@@ -45,18 +44,14 @@ void app_main(void) {
     sample_rate = SAMPLE_RATE_16KHZ;
     // sample_rate = SAMPLE_RATE_8KHZ;
 
-    BaseType_t r = xTaskCreatePinnedToCore(consume_audio_dac, "consume_audio_dac", 4092, audio_queue, 5, NULL, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(consume_audio, "consume_audio", 4092, audio_queue, 5, NULL, 1);
     assert(r == pdPASS);
 
-    adc_audio_init_transport();
+    audio_init_transport();
 
-    // Enable ADC
-    adc_audio_init(sample_rate, audio_queue);
-    adc_audio_enable(1);
-
-    // Enable DAC
-    dac_audio_init(sample_rate);
-    dac_audio_enable(1);
+    // Enable ADC/DAC
+    audio_init(sample_rate, audio_queue);
+    audio_enable(1);
 
     while (1) {
         vTaskDelay(portMAX_DELAY);
