@@ -20,15 +20,19 @@ static alarm_id_t led_toggle_alarm = 0;
 // Detect ENABLE_PIN changes
 void gpio_callback(uint gpio, uint32_t event_mask) {
     if (event_mask == (GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL)) {
+        DEBUG("Enable pin both edges\n");
         return;
     }
     
+    
     if (event_mask == GPIO_IRQ_EDGE_RISE) {
+        DEBUG("Enable 1\n");
         enabled = true;
         return;
     }
 
     if (event_mask == GPIO_IRQ_EDGE_FALL) {
+        DEBUG("Enable 0\n");
         enabled = false;
     }
 }
@@ -81,7 +85,6 @@ int main() {
         
         if (initialized) {
             // Check for any ADC samples in queue, and notify i2c master in case of availablity
-            // If no samples are available this will block until next event
             audio_transfer_samples();
             continue;
         }

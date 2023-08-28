@@ -10,7 +10,7 @@
 #include "esp_timer.h"
 #include "audio.h"
 
-#define AD_TAG "AD"
+#define TAG "Audio"
 
 #define I2C_PORT 0
 #define I2C_SLAVE_ADDRESS 32
@@ -85,10 +85,10 @@ static void audio_i2c_data_task_handler(void *arg) {
         buf_size = audio_get_buffer_size();
         
         if (!configured) {
-            ESP_LOGW(AD_TAG, "setting sample rate to: %d", audio_sample_rate);
+            ESP_LOGW(TAG, "Setting sample rate to: %d", audio_sample_rate);
             ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, (uint8_t *) &audio_sample_rate, 1, portMAX_DELAY));
             configured = 1;
-            ESP_LOGI(AD_TAG, "Configured ADC");
+            ESP_LOGI(TAG, "Configured audio device");
             continue;
         }
         
@@ -114,7 +114,7 @@ static void audio_i2c_data_task_handler(void *arg) {
         memcpy(audio_out_buf, tmp_buf, received);
         received = 0;
         vRingbufferReturnItem(audio_out_rb, tmp_buf);
-        ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, 32, audio_out_buf, buf_size, portMAX_DELAY));
+        i2c_master_write_to_device(I2C_PORT, 32, audio_out_buf, buf_size, portMAX_DELAY);
     }
 }
 
@@ -171,13 +171,13 @@ void audio_enable(uint8_t status) {
     }
     
     if (status) {
-        ESP_LOGW(AD_TAG, "Enabling ADC");
+        ESP_LOGW(TAG, "Enabling audio");
         enabled = 1;
         gpio_set_level(AUDIO_ENABLE_PIN, 1);
         return;
     }
 
-    ESP_LOGW(AD_TAG, "Disabling ADC");
+    ESP_LOGW(TAG, "Disabling audio");
     gpio_set_level(AUDIO_ENABLE_PIN, 0);
     i2c_reset_tx_fifo(I2C_PORT);
     i2c_reset_rx_fifo(I2C_PORT);
@@ -186,7 +186,7 @@ void audio_enable(uint8_t status) {
 }
 
 void audio_init_transport() {
-    ESP_LOGI(AD_TAG, "Initializing ADC I2C transport");
+    ESP_LOGI(TAG, "Initializing audio I2C transport");
 
     QueueHandle_t audio_read_notif_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(audio_read_notif_queue != NULL);
@@ -236,7 +236,7 @@ void audio_init(sample_rate_t sample_rate, QueueHandle_t audio_ready_q) {
 
     size_t audio_buf_size = audio_get_buffer_size();
     uint16_t sample_rate_hz = (sample_rate == SAMPLE_RATE_16KHZ) ? 16000 : 8000;
-    ESP_LOGI(AD_TAG, "Initializing Audio. Sample rate: %d. Buffer size: %d", sample_rate_hz, audio_buf_size);
+    ESP_LOGI(TAG, "Initializing Audio. Sample rate: %d. Buffer size: %d", sample_rate_hz, audio_buf_size);
 
     audio_in_buf = malloc(audio_buf_size);
     assert(audio_in_buf != NULL);
@@ -297,5 +297,5 @@ void audio_deinit() {
     initialized = 0;
     audio_ready_queue = NULL;
 
-    ESP_LOGI(AD_TAG, "De-initialized ADC");
+    ESP_LOGI(TAG, "De-initialized audio");
 }

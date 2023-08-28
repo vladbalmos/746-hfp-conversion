@@ -100,7 +100,7 @@ static void audio_dac_dma_isr() {
     }
 
 #ifdef DEBUG_MODE
-        if (sent_dac_counter++ % 125 == 0 && dac_current_buf_index_streaming > -1) {
+        if (sent_dac_counter++ % 500 == 0 && dac_current_buf_index_streaming > -1) {
             DEBUG("DAC Data transfered. Sampling duration: %lld us.\n", dac_sampling_duration_us);
         }
 #endif
@@ -138,7 +138,7 @@ static void audio_adc_dma_isr() {
         }
 
 #ifdef DEBUG_MODE
-        if (sent_adc_counter++ % 125 == 0 && adc_samples_buf_index > -1) {
+        if (sent_adc_counter++ % 500 == 0 && adc_samples_buf_index > -1) {
             DEBUG("ADC Data transfered. Sampling duration: %lld us.\n", adc_sampling_duration_us);
         }
 #endif
