@@ -82,6 +82,45 @@ static int64_t dac_sampling_duration_us = 0;
 
 #endif
 
+
+static inline size_t i2c_write_blocking_timeout_us(uint8_t *src, size_t len, int64_t timeout_us) {
+    absolute_time_t now = get_absolute_time();
+    absolute_time_t start = now;
+    int64_t elapsed;
+
+    for (size_t i = 0; i < len; ++i) {
+        while (!i2c_get_write_available(i2c0)) {
+            now = get_absolute_time();
+            elapsed = absolute_time_diff_us(start, now);
+            if (elapsed >= timeout_us) {
+                return 0;
+            }
+        }
+
+        i2c_get_hw(i2c0)->data_cmd = *src++;
+    }
+    return len;
+}
+
+static inline size_t i2c_read_blocking_timeout_us(uint8_t *dst, size_t len, int64_t timeout_us) {
+    absolute_time_t now = get_absolute_time();
+    absolute_time_t start = now;
+    int64_t elapsed;
+
+    for (size_t i = 0; i < len; ++i) {
+        while (!i2c_get_read_available(i2c0)) {
+            now = get_absolute_time();
+            elapsed = absolute_time_diff_us(start, now);
+            if (elapsed >= timeout_us) {
+                return 0;
+            }
+        }
+        *dst++ = (uint8_t)i2c_get_hw(i2c0)->data_cmd;
+    }
+    
+    return len;
+}
+
 static void audio_dac_dma_isr() {
 #ifdef DEBUG_MODE
     absolute_time_t now;
@@ -181,7 +220,7 @@ static void i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
             }
             
             // Audio samples for DAC
-            i2c_read_raw_blocking(i2c0, (uint8_t *) dac_samples_buf[dac_samples_buf_index++], buffer_size);
+            i2c_read_blocking_timeout_us((uint8_t *) dac_samples_buf[dac_samples_buf_index++], buffer_size, 5000);
             if (dac_samples_buf_index >= MAX_BUFFERS) {
                 dac_samples_buf_index = 0;
             }
@@ -195,7 +234,7 @@ static void i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
             break;
         }
         case I2C_SLAVE_REQUEST: // master is requesting data
-            i2c_write_raw_blocking(i2c0, i2c_data_out_buf, buffer_size);
+            i2c_write_blocking_timeout_us(i2c_data_out_buf, buffer_size, 5000);
             break;
         case I2C_SLAVE_FINISH: // master has signalled Stop / Restart
             // context.mem_address_written = false;
