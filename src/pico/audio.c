@@ -371,8 +371,8 @@ void audio_init() {
     uint16_t sample_rate = 0;
 
     gpio_put(data_ready_pin, 1);
-    sleep_ms(1);
     gpio_put(data_ready_pin, 0);
+    sleep_ms(5);
     queue_remove_blocking(&i2c_msg_q, &sample_rate);
 
     DEBUG("Sample rate raw value: %d\n", sample_rate);
