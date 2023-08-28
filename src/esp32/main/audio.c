@@ -114,7 +114,7 @@ static void audio_i2c_data_task_handler(void *arg) {
         memcpy(audio_out_buf, tmp_buf, received);
         received = 0;
         vRingbufferReturnItem(audio_out_rb, tmp_buf);
-        // i2c_master_write_to_device(I2C_PORT, 32, audio_out_buf, buf_size, portMAX_DELAY);
+        i2c_master_write_to_device(I2C_PORT, 32, audio_out_buf, buf_size, portMAX_DELAY);
     }
 }
 
