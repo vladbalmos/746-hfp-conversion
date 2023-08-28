@@ -373,7 +373,6 @@ void audio_init() {
     gpio_put(data_ready_pin, 1);
     sleep_ms(1);
     gpio_put(data_ready_pin, 0);
-    
     queue_remove_blocking(&i2c_msg_q, &sample_rate);
 
     DEBUG("Sample rate raw value: %d\n", sample_rate);
@@ -429,75 +428,4 @@ void audio_init() {
     configured = 1;
     audio_adc_dma_isr();
     adc_run(true);
-}
-
-void audio_deinit() {
-    DEBUG("De-initializing audio\n");
-    
-    // De-init ADC DMA
-    dma_channel_set_irq0_enabled(audio_adc_dma_chan, false);
-    irq_set_enabled(DMA_IRQ_0, false);
-    irq_remove_handler(DMA_IRQ_0, audio_adc_dma_isr);
-    dma_channel_abort(audio_adc_dma_chan);
-    if (!sinewave_enabled) {
-        adc_run(false);
-        adc_fifo_drain();
-        DEBUG("Drained ADC fifo\n");
-    }
-    dma_channel_unclaim(audio_adc_dma_chan);
-    DEBUG("Disabled ADC DMA\n");
-
-    // De-init DAC DMA
-    dma_channel_set_irq0_enabled(audio_dac_dma_chan, false);
-    irq_set_enabled(DMA_IRQ_1, false);
-    irq_remove_handler(DMA_IRQ_1, audio_dac_dma_isr);
-    dma_channel_abort(audio_dac_dma_chan);
-    dma_channel_unclaim(audio_dac_dma_chan);
-    DEBUG("Disabled DAC DMA\n");
-
-    if (dma_timer_is_claimed(AUDIO_SINEWAVE_DMA_TIMER)) {
-        dma_timer_unclaim(AUDIO_SINEWAVE_DMA_TIMER);
-        DEBUG("Unclaimed sinewave DMA timer\n");
-    }
-    
-    // Free buffers
-    queue_free(&i2c_msg_q);
-
-    for (int i = 0; i < MAX_BUFFERS; i++) {
-        free(adc_samples_buf[i]);
-        adc_samples_buf[i] = NULL;
-
-        free(dac_samples_buf[i]);
-        dac_samples_buf[i] = NULL;
-    }
-    
-    free(i2c_data_out_buf);
-    i2c_data_out_buf = NULL;
-    
-    sinewave_buf = NULL;
-    DEBUG("Freed buffers\n");
-
-    adc_samples_buf_index = -1;
-    dac_samples_buf_index = 0;
-    dac_current_buf_index_streaming = -1;
-
-    buffer_samples_count = 0;
-    buffer_size = 0;
-
-    audio_sample_rate = SAMPLE_RATE_NONE;
-    dac_streaming = 0;
-    sinewave_enabled = 0;
-    configured = 0;
-    DEBUG("Reset counters and flags\n");
-
-    gpio_put(data_ready_pin, 0);
-    gpio_put(SPI_DAC_CS_PIN, 1);
-    DEBUG("Reset signal pins\n");
-    
-    // Drain I2C fifo
-    size_t bytes_to_discard = i2c_get_read_available(i2c0);
-    for (int i = 0; i < bytes_to_discard; i++) {
-        i2c_read_byte_raw(i2c0);
-    }
-    DEBUG("Discarded %d bytes of I2C data\n", bytes_to_discard);
 }

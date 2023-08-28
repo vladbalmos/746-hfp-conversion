@@ -200,6 +200,7 @@ void audio_init_transport() {
     output_conf.mode = GPIO_MODE_OUTPUT;
     output_conf.pin_bit_mask = 1ULL << AUDIO_ENABLE_PIN;
     ESP_ERROR_CHECK(gpio_config(&output_conf));
+    gpio_set_level(AUDIO_ENABLE_PIN, 0);
 
     // Configure data ready pin
     gpio_config_t input_conf = {};
