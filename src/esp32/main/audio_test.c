@@ -51,7 +51,6 @@ void app_main(void) {
 
     // Enable ADC/DAC
     audio_init(sample_rate, audio_queue);
-    vTaskDelay(10);
     audio_enable(1);
 
     while (1) {

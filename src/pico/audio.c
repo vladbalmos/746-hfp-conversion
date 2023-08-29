@@ -47,6 +47,9 @@
 #define ADC_SIGNAL_BIAS 2048
 #define AUDIO_SINEWAVE_DMA_TIMER 0
 
+#define AUDIO_STATE_NONE 0
+#define AUDIO_STATE_INITIALIZED 1
+
 #define CMD_AUDIO_ENABLE 1
 #define CMD_AUDIO_RECEIVE 2
 #define CMD_AUDIO_TRANSMIT 6
@@ -70,9 +73,12 @@ static size_t buffer_size = 0;
 static int16_t *sinewave_buf = NULL;
 static uint8_t sinewave_enabled = 0;
 static queue_t samples_ready_q;
-static queue_t i2c_msg_q;
+static queue_t i2c_msg_in_q;
+static queue_t i2c_msg_out_q;
 static uint8_t initialized = 0;
 static uint16_t master_cmd = 0;
+static uint8_t current_state = AUDIO_STATE_NONE;
+static uint16_t last_cmd = 0;
 
 #ifdef DEBUG_MODE
 static uint64_t sent_adc_counter = 0;
@@ -166,52 +172,90 @@ static void audio_adc_dma_isr() {
     dma_channel_set_write_addr(audio_adc_dma_chan, adc_samples_buf[adc_samples_buf_index], true);
 }
 
+// Our handler is called from the I2C ISR, so it must complete quickly. Blocking calls /
+// printing to stdio may interfere with interrupt handling.
+static void i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
+    uint16_t cmd_reply = 0;
+    uint8_t cmd = 0;
+    switch (event) {
+        case I2C_SLAVE_RECEIVE: {
+            i2c_read((uint8_t *) &master_cmd, sizeof(uint16_t));
+            cmd = master_cmd >> 8;
+
+            if (current_state == AUDIO_STATE_NONE) {
+                if (cmd == CMD_AUDIO_ENABLE) {
+                    queue_try_add(&i2c_msg_in_q, &master_cmd);
+                    cmd_reply = 1;
+                    queue_try_add(&i2c_msg_out_q, &cmd_reply);
+                    cmd_reply = 0;
+                    current_state = AUDIO_STATE_INITIALIZED;
+                    break;
+                } 
+            } else if (current_state == AUDIO_STATE_INITIALIZED) {
+            }
+            break;
+        }
+        case I2C_SLAVE_REQUEST: // master is requesting data
+            queue_try_remove(&i2c_msg_out_q, &cmd_reply);
+            i2c_write((uint8_t *) &cmd_reply, 2);
+            cmd_reply = 0;
+            break;
+        case I2C_SLAVE_FINISH: // master has signalled Stop / Restart
+            // context.mem_address_written = false;
+            break;
+        default:
+            break;
+    }
+}
+
 void audio_process_master_cmd() {
-    i2c_read((uint8_t *) &master_cmd, sizeof(uint16_t));
+    uint16_t master_cmd = 0;
+    queue_remove_blocking(&i2c_msg_in_q, &master_cmd);
+    
     uint8_t cmd = master_cmd >> 8;
-    uint8_t *adc_buf = NULL;
-    uint16_t status_ok = 1;
+    // uint8_t *adc_buf = NULL;
+    // uint16_t status_ok = 1;
     
     if ((cmd == CMD_AUDIO_ENABLE) && !initialized) {
         audio_init((sample_rate_t) (master_cmd & 0xff));
-        DEBUG("wRITING REPLY\n");
-        i2c_write(&status_ok, 2);
-        DEBUG("wrote reply\n");
         return;
     }
 
     if ((cmd == CMD_AUDIO_DISABLE) && initialized) {
         audio_deinit();
-        i2c_write(&status_ok, 2);
         return;
     }
     
-    if (cmd == CMD_AUDIO_RECEIVE) {
-        i2c_read((uint8_t *) dac_samples_buf[dac_samples_buf_index++], buffer_size);
-        if (dac_samples_buf_index >= MAX_BUFFERS) {
-            dac_samples_buf_index = 0;
-        }
+    // if (cmd == CMD_AUDIO_RECEIVE) {
+    //     i2c_read((uint8_t *) dac_samples_buf[dac_samples_buf_index++], buffer_size);
+    //     if (dac_samples_buf_index >= MAX_BUFFERS) {
+    //         dac_samples_buf_index = 0;
+    //     }
         
-        if (!dac_streaming) {
-            dac_streaming = 1;
-            audio_dac_dma_isr();
-        }
-        return;
-    }
+    //     if (!dac_streaming) {
+    //         dac_streaming = 1;
+    //         audio_dac_dma_isr();
+    //     }
+    //     return;
+    // }
 
-    if (cmd == CMD_AUDIO_TRANSMIT) {
-        if (!queue_try_remove(&samples_ready_q, &adc_buf)) {
-            memset(i2c_data_out_buf, '\0', buffer_size);
-        } else {
-            memcpy(i2c_data_out_buf, adc_buf, buffer_size);
-        }
-        i2c_write(i2c_data_out_buf, buffer_size);
-        return;
-    }
+    // if (cmd == CMD_AUDIO_TRANSMIT) {
+    //     if (!queue_try_remove(&samples_ready_q, &adc_buf)) {
+    //         memset(i2c_data_out_buf, '\0', buffer_size);
+    //     } else {
+    //         memcpy(i2c_data_out_buf, adc_buf, buffer_size);
+    //     }
+    //     i2c_write(i2c_data_out_buf, buffer_size);
+    //     return;
+    // }
 }
 
 void audio_transport_init() {
     DEBUG("Initializing audio transport\n");
+
+    queue_init(&i2c_msg_in_q, sizeof(uint16_t), 8);
+    queue_init(&i2c_msg_out_q, sizeof(uint16_t), 8);
+
 
     // I2C
     gpio_init(I2C_SDA_PIN);
@@ -223,7 +267,8 @@ void audio_transport_init() {
     gpio_pull_up(I2C_SCL_PIN);
     
     i2c_init(i2c0, I2C_BAUDRATE);
-    i2c_set_slave_mode(i2c0, true, I2C_ADDRESS);
+    // i2c_set_slave_mode(i2c0, true, I2C_ADDRESS);
+    i2c_slave_init(i2c0, I2C_ADDRESS, i2c_slave_handler);
     DEBUG("Initialized I2C\n");
 
     // SPI
@@ -234,11 +279,10 @@ void audio_transport_init() {
     gpio_set_function(SPI_DAC_SCLK_PIN, GPIO_FUNC_SPI);
     gpio_set_function(SPI_DAC_CS_PIN, GPIO_FUNC_SPI);
 
-    queue_init(&i2c_msg_q, sizeof(uint8_t), 1);
-
     // Silence please
     gpio_put(SPI_DAC_CS_PIN, 1);
     DEBUG("Initialized SPI\n");
+    
 }
 
 static void init_audio_sine_dma() {
@@ -458,7 +502,8 @@ void audio_deinit() {
     }
     
     // Free buffers
-    queue_free(&i2c_msg_q);
+    queue_free(&i2c_msg_in_q);
+    queue_free(&i2c_msg_out_q);
 
     for (int i = 0; i < MAX_BUFFERS; i++) {
         free(adc_samples_buf[i]);

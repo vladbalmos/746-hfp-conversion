@@ -84,24 +84,24 @@ static void cmd_task_handler(void *arg) {
         if (cmd == CMD_AUDIO_ENABLE) {
             ESP_LOGW(TAG, "Setting sample rate to: %d", audio_sample_rate);
             i2c_cmd = (CMD_AUDIO_ENABLE << 8) | audio_sample_rate;
-            ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, (uint8_t *) &i2c_cmd, 2, portMAX_DELAY));
-            ESP_LOGI(TAG, "Reading reply");
-            ESP_ERROR_CHECK(i2c_master_read_from_device(I2C_PORT, I2C_SLAVE_ADDRESS, &i2c_cmd_reply, 2, portMAX_DELAY));
+            ESP_ERROR_CHECK(i2c_master_write_read_device(I2C_PORT, I2C_SLAVE_ADDRESS, (uint8_t *) &i2c_cmd, 2, (uint8_t *) &i2c_cmd_reply, 2, portMAX_DELAY));
+            ESP_LOGI(TAG, "Configured audio device: %d", i2c_cmd_reply);
             assert(i2c_cmd_reply == 1);
             i2c_cmd_reply = 0;
-            ESP_LOGI(TAG, "Configured audio device");
             continue;
         }
 
-        // if (cmd == CMD_AUDIO_DISABLE) {
-        //     ESP_LOGW(TAG, "Disabling audio");
-        //     i2c_cmd = CMD_AUDIO_DISABLE << 8;
-        //     ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, (uint8_t *) &i2c_cmd, 2, portMAX_DELAY));
-        //     ESP_ERROR_CHECK(i2c_master_read_from_device(I2C_PORT, I2C_SLAVE_ADDRESS, &i2c_cmd_reply, 1, portMAX_DELAY));
-        //     assert(i2c_cmd_reply == 1);
-        //     i2c_cmd_reply = 0;
-        //     continue;
-        // }
+        if (cmd == CMD_AUDIO_DISABLE) {
+            ESP_LOGW(TAG, "Disabling audio");
+            i2c_cmd = CMD_AUDIO_DISABLE << 8;
+            ESP_ERROR_CHECK(i2c_master_write_read_device(I2C_PORT, I2C_SLAVE_ADDRESS, (uint8_t *) &i2c_cmd, 2, (uint8_t *) &i2c_cmd_reply, 2, portMAX_DELAY));
+            assert(i2c_cmd_reply == 1);
+            i2c_cmd_reply = 0;
+            continue;
+        }
+        
+        // use write_read to receive adc data
+
         // if (cmd == CMD_AUDIO_TRANSMIT) {
         //     // Write audio data to DAC
         //     tmp_buf = xRingbufferReceiveUpTo(audio_out_rb, &received, 0, buf_size);
@@ -119,6 +119,7 @@ static void cmd_task_handler(void *arg) {
         //     received = 0;
         //     vRingbufferReturnItem(audio_out_rb, tmp_buf);
 
+                // TODO: write command and data in the same transaction
         //     i2c_cmd = CMD_AUDIO_TRANSMIT << 8;
         //     ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, (uint8_t *) &i2c_cmd, 2, portMAX_DELAY));
         //     i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, audio_out_buf, buf_size, portMAX_DELAY);
@@ -227,6 +228,7 @@ void audio_init_transport() {
     };
     ESP_ERROR_CHECK(i2c_param_config(i2c_port, &conf));
     ESP_ERROR_CHECK(i2c_driver_install(i2c_port, conf.mode, 0, 0, 0));
+    ESP_ERROR_CHECK(i2c_set_timeout(I2C_PORT, 1600)); // PICO is slower, increase timeout
 }
 
 void audio_init(sample_rate_t sample_rate, QueueHandle_t audio_ready_q) {
