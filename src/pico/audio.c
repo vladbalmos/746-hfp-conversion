@@ -84,6 +84,11 @@ static queue_t i2c_msg_out_q;
 static uint8_t initialized = 0;
 static uint16_t master_cmd = 0;
 static uint8_t current_state = AUDIO_STATE_NONE;
+static uint8_t receive_in_progress = 0;
+static uint8_t transfer_in_progress = 0;
+static size_t bytes_received = 0;
+static size_t bytes_sent = 0;
+static size_t bytes_available = 0;
 
 #ifdef DEBUG_MODE
 static uint64_t sent_adc_counter = 0;
@@ -184,8 +189,13 @@ static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
 
     switch (event) {
         case I2C_SLAVE_RECEIVE: {
-            i2c_read((uint8_t *) &master_cmd, sizeof(uint16_t));
-            cmd = master_cmd >> 8;
+                                    
+            if (!receive_in_progress) {
+                i2c_read((uint8_t *) &master_cmd, sizeof(uint16_t));
+                cmd = master_cmd >> 8;
+            } else {
+                cmd = CMD_AUDIO_RECEIVE;
+            }
 
             if (current_state == AUDIO_STATE_NONE) {
 
@@ -217,13 +227,29 @@ static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
                 }
                 
                 if (cmd == CMD_AUDIO_RECEIVE) {
-                    queue_try_add(&i2c_msg_in_q, &master_cmd);
-                    // if (dac_samples_buf_index < 0 || dac_samples_buf_index >= MAX_BUFFERS) {
-                    //     dac_samples_buf_index = 0;
-                    // }
-                    // absolute_time_t start = get_absolute_time();
+                    if (!receive_in_progress) {
+                        receive_in_progress = 1;
+                        if (dac_samples_buf_index < 0 || dac_samples_buf_index >= MAX_BUFFERS) {
+                            dac_samples_buf_index = 0;
+                        }
+                    }
+                    
+                    bytes_available = i2c_get_read_available(i2c0);
+                    if (!bytes_available) {
+                        break;
+                    }
+                    i2c_read((uint8_t *) dac_samples_buf[dac_samples_buf_index] + bytes_received, bytes_available);
+                    bytes_received += bytes_available;
+
+                    if (bytes_received == buffer_size) {
+                        receive_in_progress = 0;
+                        bytes_received = 0;
+                        dac_samples_buf_index++;
+                        uint16_t x = cmd << 8;
+                        queue_try_add(&i2c_msg_in_q, &x);
+                    }
+
                     // i2c_read((uint8_t *) dac_samples_buf[dac_samples_buf_index++], buffer_size);
-                    // read_duration = absolute_time_diff_us(start, get_absolute_time());
                     // queue_try_add(&i2c_msg_in_q, &master_cmd);
                     // cmd_reply = CMD_REPLY_OK;
                     // queue_try_add(&i2c_msg_out_q, &cmd_reply);
@@ -232,10 +258,9 @@ static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
                 }
                 
                 if (cmd == CMD_AUDIO_TRANSMIT) {
-                    queue_try_add(&i2c_msg_in_q, &master_cmd);
-                    // cmd_reply = CMD_REPLY_DATA;
-                    // queue_try_add(&i2c_msg_out_q, &cmd_reply);
-                    // cmd_reply = CMD_REPLY_NONE;
+                    cmd_reply = CMD_REPLY_DATA;
+                    queue_try_add(&i2c_msg_out_q, &cmd_reply);
+                    cmd_reply = CMD_REPLY_NONE;
                     break;
                 }
             }
@@ -245,22 +270,41 @@ static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
             break;
         }
         case I2C_SLAVE_REQUEST: {
-            if (!queue_try_remove(&i2c_msg_out_q, &cmd_reply)) {
-                goto empty_reply;
+            if (!transfer_in_progress) {
+                if (!queue_try_remove(&i2c_msg_out_q, &cmd_reply)) {
+                    goto empty_reply;
+                }
+            } else {
+                cmd_reply = CMD_REPLY_DATA;
             }
             
             if (cmd_reply == CMD_REPLY_OK) {
                 i2c_write((uint8_t *) &cmd_reply, 2);
-            } /* else if (cmd_reply == CMD_REPLY_DATA) {
-                if (adc_current_buf_index_streaming < 0 || adc_current_buf_index_streaming >= MAX_BUFFERS) {
-                    adc_current_buf_index_streaming = 0;
+            } else if (cmd_reply == CMD_REPLY_DATA) {
+                if (!transfer_in_progress) {
+                    transfer_in_progress = 1;
+                    
+                    if (adc_current_buf_index_streaming < 0 || adc_current_buf_index_streaming >= MAX_BUFFERS) {
+                        adc_current_buf_index_streaming = 0;
+                    }
+                    adc_streamed_count++;
                 }
-                adc_streamed_count++;
-                i2c_write((uint8_t *) adc_samples_buf[adc_current_buf_index_streaming++], buffer_size);
-            } */ else {
+
+                bytes_available = i2c_get_write_available(i2c0);
+                if (!bytes_available) {
+                    break;
+                }
+                i2c_write((uint8_t *) adc_samples_buf[adc_current_buf_index_streaming] + bytes_sent, bytes_available);
+                bytes_sent += bytes_available;
+                
+                if (bytes_sent == buffer_size) {
+                    transfer_in_progress = 0;
+                    bytes_sent = 0;
+                    adc_current_buf_index_streaming++;
+                }
+            } else {
                 goto empty_reply;
             }
-            
             
             cmd_reply = 0;
             break;
@@ -293,31 +337,15 @@ void audio_process_master_cmd() {
     }
     
     if (cmd == CMD_AUDIO_RECEIVE) {
-        if (dac_samples_buf_index < 0 || dac_samples_buf_index >= MAX_BUFFERS) {
-            dac_samples_buf_index = 0;
+        if (!dac_streaming) {
+            dac_streaming = 1;
+            audio_dac_dma_isr();
         }
-        absolute_time_t start = get_absolute_time();
-        i2c_read((uint8_t *) dac_samples_buf[dac_samples_buf_index++], buffer_size);
-        read_duration = absolute_time_diff_us(start, get_absolute_time());
-        cmd_reply = CMD_REPLY_OK;
-        queue_try_add(&i2c_msg_out_q, &cmd_reply);
-        cmd_reply = CMD_REPLY_NONE;
-
-        DEBUG("Duration is: %lld\n", read_duration);
-        // if (!dac_streaming) {
-        //     dac_streaming = 1;
-        //     audio_dac_dma_isr();
-        // }
         // TODO: Log event
         return;
     }
     
     if (cmd == CMD_AUDIO_TRANSMIT) {
-        if (adc_current_buf_index_streaming < 0 || adc_current_buf_index_streaming >= MAX_BUFFERS) {
-            adc_current_buf_index_streaming = 0;
-        }
-        adc_streamed_count++;
-        i2c_write((uint8_t *) adc_samples_buf[adc_current_buf_index_streaming++], buffer_size);
         // TODO: Log event
         return;
     }
@@ -526,8 +554,8 @@ void audio_init(sample_rate_t sample_rate) {
         memset(dac_samples_buf[i], 0, buffer_size);
     }
     
-    // init_audio_adc_dma();
-    init_audio_sine_dma();
+    init_audio_adc_dma();
+    // init_audio_sine_dma();
     init_audio_dac_dma();
     
 #ifdef DEBUG_MODE

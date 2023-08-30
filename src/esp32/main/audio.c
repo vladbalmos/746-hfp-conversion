@@ -123,7 +123,8 @@ static void cmd_task_handler(void *arg) {
             received = 0;
             vRingbufferReturnItem(audio_out_rb, tmp_buf);
 
-            ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, audio_out_buf, buf_size + sizeof(i2c_cmd), portMAX_DELAY));
+            // ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, audio_out_buf, buf_size + sizeof(i2c_cmd), portMAX_DELAY));
+            i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, audio_out_buf, buf_size + sizeof(i2c_cmd), portMAX_DELAY);
             continue;
         }
 
@@ -186,7 +187,8 @@ void audio_send(const uint8_t *buf, size_t size) {
     uint8_t sample_count = size / 2;
     
     for (int i = 0; i < sample_count; i++) {
-        dst[i] = ((int16_t)(src[i] * 0.3) - INT16_MIN) >> 4;
+        // dst[i] = ((int16_t)(src[i] * 0.3) - INT16_MIN) >> 4;
+        dst[i] = ((int16_t)(src[i]) - INT16_MIN) >> 4;
     }
     
     xRingbufferSend(audio_out_rb, audio_out_resample_buf, size, 0);
