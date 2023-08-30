@@ -54,22 +54,22 @@ void app_main(void) {
     audio_init(sample_rate, audio_queue);
     audio_enable(audio_enable_state);
     
-    int64_t now = esp_timer_get_time();
-    int64_t last_changed = esp_timer_get_time();
-    int64_t diff = 0;
+    // int64_t now = esp_timer_get_time();
+    // int64_t last_changed = esp_timer_get_time();
+    // int64_t diff = 0;
 
     while (1) {
         vTaskDelay(10);
-        now = esp_timer_get_time();
+        // now = esp_timer_get_time();
         
-        diff = (now - last_changed) / 1000;
+        // diff = (now - last_changed) / 1000;
         
-        if (diff >= 2000) {
-            ESP_LOGI(TAG, "Changing state from %d to %d", audio_enable_state, !audio_enable_state);
-            audio_enable_state = !audio_enable_state;
-            last_changed = now;
-            audio_enable(audio_enable_state);
-        }
+        // if (diff >= 2000) {
+        //     ESP_LOGI(TAG, "Changing state from %d to %d", audio_enable_state, !audio_enable_state);
+        //     audio_enable_state = !audio_enable_state;
+        //     last_changed = now;
+        //     audio_enable(audio_enable_state);
+        // }
     }
 
 }
