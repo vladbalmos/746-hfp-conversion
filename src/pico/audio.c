@@ -183,6 +183,7 @@ static void i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
             cmd = master_cmd >> 8;
 
             if (current_state == AUDIO_STATE_NONE) {
+
                 if (cmd == CMD_AUDIO_ENABLE) {
                     queue_try_add(&i2c_msg_in_q, &master_cmd);
                     cmd_reply = 1;
@@ -191,7 +192,17 @@ static void i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
                     current_state = AUDIO_STATE_INITIALIZED;
                     break;
                 } 
+
             } else if (current_state == AUDIO_STATE_INITIALIZED) {
+
+                if (cmd == CMD_AUDIO_DISABLE) {
+                    queue_try_add(&i2c_msg_in_q, &master_cmd);
+                    cmd_reply = 1;
+                    queue_try_add(&i2c_msg_out_q, &cmd_reply);
+                    cmd_reply = 0;
+                    current_state = AUDIO_STATE_NONE;
+                    break;
+                }
             }
             break;
         }
@@ -222,6 +233,7 @@ void audio_process_master_cmd() {
     }
 
     if ((cmd == CMD_AUDIO_DISABLE) && initialized) {
+        DEBUG("de initializing\n");
         audio_deinit();
         return;
     }
@@ -459,8 +471,8 @@ void audio_init(sample_rate_t sample_rate) {
 
     queue_init(&samples_ready_q, sizeof(uint8_t *), 8);
 
-    // init_audio_adc_dma();
-    init_audio_sine_dma();
+    init_audio_adc_dma();
+    // init_audio_sine_dma();
     init_audio_dac_dma();
     
 #ifdef DEBUG_MODE
@@ -469,7 +481,9 @@ void audio_init(sample_rate_t sample_rate) {
 
     initialized = 1;
     audio_adc_dma_isr();
-    adc_run(true);
+    if (!sinewave_enabled) {
+        adc_run(true);
+    }
 }
 
 void audio_deinit() {
@@ -502,8 +516,7 @@ void audio_deinit() {
     }
     
     // Free buffers
-    queue_free(&i2c_msg_in_q);
-    queue_free(&i2c_msg_out_q);
+    queue_free(&samples_ready_q);
 
     for (int i = 0; i < MAX_BUFFERS; i++) {
         free(adc_samples_buf[i]);
