@@ -458,8 +458,8 @@ void audio_init() {
 
     queue_init(&samples_ready_q, sizeof(uint8_t *), 8);
 
-    // init_audio_adc_dma();
-    init_audio_sine_dma();
+    init_audio_adc_dma();
+    // init_audio_sine_dma();
     init_audio_dac_dma();
     
 #ifdef DEBUG_MODE
@@ -502,6 +502,7 @@ void audio_deinit() {
     
     // Free buffers
     queue_free(&i2c_msg_q);
+    queue_free(&samples_ready_q);
 
     for (int i = 0; i < MAX_BUFFERS; i++) {
         free(adc_samples_buf[i]);
