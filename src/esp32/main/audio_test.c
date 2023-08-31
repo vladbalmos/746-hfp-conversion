@@ -36,13 +36,14 @@ static void consume_audio(void *arg) {
 }
 
 void app_main(void) {
+    int audio_enable_state = 1;
     ESP_ERROR_CHECK(gpio_install_isr_service(0));
 
     QueueHandle_t audio_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(audio_queue != NULL);
     
-    sample_rate = SAMPLE_RATE_16KHZ;
-    // sample_rate = SAMPLE_RATE_8KHZ;
+    // sample_rate = SAMPLE_RATE_16KHZ;
+    sample_rate = SAMPLE_RATE_8KHZ;
 
     BaseType_t r = xTaskCreatePinnedToCore(consume_audio, "consume_audio", 4092, audio_queue, 5, NULL, 1);
     assert(r == pdPASS);
@@ -51,10 +52,24 @@ void app_main(void) {
 
     // Enable ADC/DAC
     audio_init(sample_rate, audio_queue);
-    audio_enable(1);
+    audio_enable(audio_enable_state);
+    
+    int64_t now = esp_timer_get_time();
+    int64_t last_changed = esp_timer_get_time();
+    int64_t diff = 0;
 
     while (1) {
-        vTaskDelay(portMAX_DELAY);
+        vTaskDelay(10);
+        now = esp_timer_get_time();
+        
+        diff = (now - last_changed) / 1000;
+        
+        if (diff >= 5000) {
+        //     ESP_LOGI(TAG, "Changing state from %d to %d", audio_enable_state, !audio_enable_state);
+        //     audio_enable_state = !audio_enable_state;
+        //     last_changed = now;
+        //     audio_enable(audio_enable_state);
+        }
     }
 
 }

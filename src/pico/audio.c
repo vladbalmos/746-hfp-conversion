@@ -47,29 +47,50 @@
 #define ADC_SIGNAL_BIAS 2048
 #define AUDIO_SINEWAVE_DMA_TIMER 0
 
+#define AUDIO_STATE_NONE 0
+#define AUDIO_STATE_INITIALIZED 1
 
-static uint8_t data_ready_pin;
+#define CMD_AUDIO_ENABLE 1
+#define CMD_AUDIO_RECEIVE 2
+#define CMD_AUDIO_POLL 5
+#define CMD_AUDIO_TRANSMIT 6
+#define CMD_AUDIO_DISABLE 7
+
+#define CMD_REPLY_NONE 0
+#define CMD_REPLY_OK 1
+#define CMD_REPLY_DATA 7
 
 static int audio_adc_dma_chan;
 static int audio_dac_dma_chan;
 
 static sample_rate_t audio_sample_rate;
 static int16_t *adc_samples_buf[MAX_BUFFERS] = {0};
-static uint8_t *i2c_data_out_buf = NULL;
 static int8_t adc_samples_buf_index = -1;
+static int8_t adc_current_buf_index_streaming = -1;
+static uint64_t adc_sampled_count = 0;
+static uint64_t adc_streamed_count = 0;
 
 static int16_t *dac_samples_buf[MAX_BUFFERS] = {0};
-static uint8_t dac_samples_buf_index = 0;
+static int8_t dac_samples_buf_index = -1;
 static int8_t dac_current_buf_index_streaming = -1;
 static int8_t dac_streaming = 0;
+static uint64_t dac_received_count = 0;
+static uint64_t dac_streamed_count = 0;
 
 static size_t buffer_samples_count = 0;
 static size_t buffer_size = 0;
 static int16_t *sinewave_buf = NULL;
 static uint8_t sinewave_enabled = 0;
-static queue_t samples_ready_q;
-static queue_t i2c_msg_q;
-static uint8_t configured = 0;
+static queue_t i2c_msg_in_q;
+static queue_t i2c_msg_out_q;
+static uint8_t initialized = 0;
+static uint16_t master_cmd = 0;
+static uint8_t current_state = AUDIO_STATE_NONE;
+static uint8_t receive_in_progress = 0;
+static uint8_t transfer_in_progress = 0;
+static size_t bytes_received = 0;
+static size_t bytes_sent = 0;
+static size_t bytes_available = 0;
 
 #ifdef DEBUG_MODE
 static uint64_t sent_adc_counter = 0;
@@ -79,49 +100,52 @@ static int64_t adc_sampling_duration_us = 0;
 static uint64_t sent_dac_counter = 0;
 static absolute_time_t dac_start_sampling_us;
 static int64_t dac_sampling_duration_us = 0;
+static int64_t read_duration = 0;
 
+static absolute_time_t i2c_receive_audio_start_us;
+static int64_t i2c_receive_audio_duration_us;
+
+static absolute_time_t i2c_transfer_audio_start_us;
+static int64_t i2c_transfer_audio_duration_us;
 #endif
 
-
-static inline size_t i2c_write_blocking_timeout_us(uint8_t *src, size_t len, int64_t timeout_us) {
-    absolute_time_t now = get_absolute_time();
-    absolute_time_t start = now;
-    int64_t elapsed;
-
-    for (size_t i = 0; i < len; ++i) {
-        while (!i2c_get_write_available(i2c0)) {
-            now = get_absolute_time();
-            elapsed = absolute_time_diff_us(start, now);
-            if (elapsed >= timeout_us) {
-                return 0;
-            }
-        }
-
-        i2c_get_hw(i2c0)->data_cmd = *src++;
-    }
-    return len;
+static inline void i2c_read(uint8_t *dst, size_t len) {
+    i2c_read_raw_blocking(i2c0, dst, len);
 }
 
-static inline size_t i2c_read_blocking_timeout_us(uint8_t *dst, size_t len, int64_t timeout_us) {
-    absolute_time_t now = get_absolute_time();
-    absolute_time_t start = now;
-    int64_t elapsed;
+static inline void i2c_write(uint8_t *src, size_t len) {
+    i2c_write_raw_blocking(i2c0, src, len);
+}
 
-    for (size_t i = 0; i < len; ++i) {
-        while (!i2c_get_read_available(i2c0)) {
-            now = get_absolute_time();
-            elapsed = absolute_time_diff_us(start, now);
-            if (elapsed >= timeout_us) {
-                return 0;
-            }
-        }
-        *dst++ = (uint8_t)i2c_get_hw(i2c0)->data_cmd;
+static void __isr apply_moving_average(int16_t *samples, size_t samples_count) {
+    if (samples_count < 3) return;  // Not enough samples for filtering
+    
+    int16_t firstSample = samples[0];
+    int16_t lastSample = samples[samples_count - 1];
+    
+    // Apply moving average filter
+    for (size_t i = 1; i < samples_count - 1; ++i) {
+        samples[i] = (samples[i - 1] + samples[i] + samples[i + 1]) / 3;
     }
     
-    return len;
+    // Edge cases: keep the first and last samples as is
+    samples[0] = firstSample;
+    samples[samples_count - 1] = lastSample; 
 }
 
-static void audio_dac_dma_isr() {
+void apply_exponential_smoothing(int16_t *input, int16_t *output, int length, float alpha) {
+    if (length <= 0) return;
+  
+    // Initialize output with the first input sample
+    output[0] = input[0];
+
+    for (int i = 1; i < length; i++) {
+        // Exponential smoothing formula
+        output[i] = (int16_t)(alpha * input[i] + (1 - alpha) * output[i - 1]);
+    }
+}
+
+static void __isr audio_dac_dma_isr() {
 #ifdef DEBUG_MODE
     absolute_time_t now;
 
@@ -133,21 +157,15 @@ static void audio_dac_dma_isr() {
 #endif
     dma_hw->ints1 = 1u << audio_dac_dma_chan;
     
-    dac_current_buf_index_streaming++;
-    if (dac_current_buf_index_streaming >= MAX_BUFFERS) {
+    if (dac_current_buf_index_streaming < 0 || dac_current_buf_index_streaming >= MAX_BUFFERS) {
         dac_current_buf_index_streaming = 0;
     }
-
-#ifdef DEBUG_MODE
-        if (sent_dac_counter++ % 500 == 0 && dac_current_buf_index_streaming > -1) {
-            DEBUG("DAC Data transfered. Sampling duration: %lld us.\n", dac_sampling_duration_us);
-        }
-#endif
-    // dma_channel_set_write_addr(audio_dac_dma_chan, dac_samples_buf[dac_current_buf_index_streaming], true);
-    dma_channel_set_read_addr(audio_dac_dma_chan, dac_samples_buf[dac_current_buf_index_streaming], true);
+    
+    dac_streamed_count++;
+    dma_channel_set_read_addr(audio_dac_dma_chan, dac_samples_buf[dac_current_buf_index_streaming++], true);
 }
 
-static void audio_adc_dma_isr() {
+static void __isr audio_adc_dma_isr() {
 #ifdef DEBUG_MODE
     absolute_time_t now;
 
@@ -163,90 +181,241 @@ static void audio_adc_dma_isr() {
 
     int32_t sample;
     if (adc_samples_buf_index != -1) {
+        adc_sampled_count++;
         if (!sinewave_enabled) {
+
+            // DEBUG("Sampled to %d\n", adc_samples_buf_index - 1);
             for (int i = 0; i < buffer_samples_count; i++) {
-                sample = (adc_samples_buf[adc_samples_buf_index][i] - ADC_SIGNAL_BIAS) * 16;
+                sample = (adc_samples_buf[adc_samples_buf_index - 1][i] - ADC_SIGNAL_BIAS) * 16;
                 
                 if (sample > INT16_MAX) {
                     sample = INT16_MAX;
                 } else if (sample < INT16_MIN) {
                     sample = INT16_MIN;
                 }
-                adc_samples_buf[adc_samples_buf_index][i] = (int16_t) sample;
+                adc_samples_buf[adc_samples_buf_index - 1][i] = (int16_t) sample;
             }
+            
+            // apply_moving_average(adc_samples_buf[adc_samples_buf_index - 1], buffer_samples_count);
+            // apply_exponential_smoothing(adc_samples_buf[adc_samples_buf_index - 1], adc_samples_buf[adc_samples_buf_index], buffer_samples_count, 0.5);
+            // for (int i = 0; i < buffer_samples_count; i++) {
+            //     adc_samples_buf[adc_samples_buf_index - 1][i] = adc_samples_buf[adc_samples_buf_index][i];
+            //     adc_samples_buf[adc_samples_buf_index][i] = 0;
+            // }
         }
 
-#ifdef DEBUG_MODE
-        if (sent_adc_counter++ % 500 == 0 && adc_samples_buf_index > -1) {
-            DEBUG("ADC Data transfered. Sampling duration: %lld us.\n", adc_sampling_duration_us);
-        }
-#endif
-        queue_try_add(&samples_ready_q, &adc_samples_buf[adc_samples_buf_index]);
     }
 
-    adc_samples_buf_index++;
-    if (adc_samples_buf_index >= MAX_BUFFERS) {
+    if (adc_samples_buf_index < 0 || adc_samples_buf_index >= MAX_BUFFERS) {
         adc_samples_buf_index = 0;
     }
     if (sinewave_enabled) {
         dma_channel_set_read_addr(audio_adc_dma_chan, sinewave_buf, false);
     }
-    dma_channel_set_write_addr(audio_adc_dma_chan, adc_samples_buf[adc_samples_buf_index], true);
+    // DEBUG("Writing to %d\n", adc_samples_buf_index);
+    dma_channel_set_write_addr(audio_adc_dma_chan, adc_samples_buf[adc_samples_buf_index++], true);
 }
-
-void audio_transfer_samples() {
-    uint8_t *buf = NULL;
-    if (!queue_try_remove(&samples_ready_q, &buf)) {
-        return __wfe();
-    }
-    
-    gpio_put(data_ready_pin, 1);
-    memcpy(i2c_data_out_buf, buf, buffer_size);
-    gpio_put(data_ready_pin, 0);
-}
-
 
 // Our handler is called from the I2C ISR, so it must complete quickly. Blocking calls /
 // printing to stdio may interfere with interrupt handling.
-static void i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
-    uint8_t data;
+static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
+    uint16_t cmd_reply = CMD_REPLY_NONE;
+    uint16_t cmd_none_reply = CMD_REPLY_NONE;
+    uint8_t cmd = 0;
+
     switch (event) {
         case I2C_SLAVE_RECEIVE: {
-            if (!configured) {
-                // Read the sample rate
-                data = i2c_read_byte_raw(i2c);
-                queue_try_add(&i2c_msg_q, &data);
-                break;
+                                    
+            if (!receive_in_progress) {
+                i2c_read((uint8_t *) &master_cmd, sizeof(uint16_t));
+                cmd = master_cmd >> 8;
+            } else {
+                cmd = CMD_AUDIO_RECEIVE;
             }
-            
-            // Audio samples for DAC
-            i2c_read_blocking_timeout_us((uint8_t *) dac_samples_buf[dac_samples_buf_index++], buffer_size, 5000);
-            if (dac_samples_buf_index >= MAX_BUFFERS) {
-                dac_samples_buf_index = 0;
+
+            if (current_state == AUDIO_STATE_NONE) {
+
+                if (cmd == CMD_AUDIO_ENABLE) {
+                    queue_try_add(&i2c_msg_in_q, &master_cmd);
+                    cmd_reply = CMD_REPLY_OK;
+                    queue_try_add(&i2c_msg_out_q, &cmd_reply);
+                    cmd_reply = CMD_REPLY_NONE;
+                    current_state = AUDIO_STATE_INITIALIZED;
+                    break;
+                } 
+
+            } else if (current_state == AUDIO_STATE_INITIALIZED) {
+
+                if (cmd == CMD_AUDIO_DISABLE) {
+                    queue_try_add(&i2c_msg_in_q, &master_cmd);
+                    cmd_reply = CMD_REPLY_OK;
+                    queue_try_add(&i2c_msg_out_q, &cmd_reply);
+                    cmd_reply = CMD_REPLY_NONE;
+                    current_state = AUDIO_STATE_NONE;
+                    break;
+                }
+                
+                if (cmd == CMD_AUDIO_POLL) {
+                    cmd_reply = (adc_sampled_count > adc_streamed_count) ? CMD_REPLY_OK : CMD_REPLY_NONE;
+                    queue_try_add(&i2c_msg_out_q, &cmd_reply);
+                    cmd_reply = CMD_REPLY_NONE;
+                    break;
+                }
+                
+                if (cmd == CMD_AUDIO_RECEIVE) {
+                    if (!receive_in_progress) {
+#ifdef DEBUG_MODE
+                        i2c_receive_audio_start_us = get_absolute_time();
+#endif
+                        receive_in_progress = 1;
+                        if (dac_samples_buf_index < 0 || dac_samples_buf_index >= MAX_BUFFERS) {
+                            dac_samples_buf_index = 0;
+                        }
+                    }
+                    
+                    bytes_available = i2c_get_read_available(i2c0);
+                    if (!bytes_available) {
+                        break;
+                    }
+                    i2c_read((uint8_t *) dac_samples_buf[dac_samples_buf_index] + bytes_received, bytes_available);
+                    bytes_received += bytes_available;
+
+                    if (bytes_received == buffer_size) {
+#ifdef DEBUG_MODE
+                        i2c_receive_audio_duration_us = absolute_time_diff_us(i2c_receive_audio_start_us, get_absolute_time());
+#endif
+                        receive_in_progress = 0;
+                        bytes_received = 0;
+                        dac_samples_buf_index++;
+                        dac_received_count++;
+                        uint16_t master_cmd = cmd << 8;
+                        queue_try_add(&i2c_msg_in_q, &master_cmd);
+                    }
+                    break;
+                }
+                
+                if (cmd == CMD_AUDIO_TRANSMIT) {
+                    if (adc_sampled_count >= 4) {
+                        cmd_reply = CMD_REPLY_DATA;
+                        queue_try_add(&i2c_msg_in_q, &master_cmd);
+                    } else {
+                        cmd_reply = CMD_REPLY_NONE;
+                    }
+                    queue_try_add(&i2c_msg_out_q, &cmd_reply);
+                    cmd_reply = CMD_REPLY_NONE;
+                    break;
+                }
             }
-            
-            // Wait for at least two buffers to be received, then start
-            // dma streaming to DAC
-            if (!dac_streaming && dac_samples_buf_index == 2) {
-                dac_streaming = 1;
-                audio_dac_dma_isr();
-            }
+
+            cmd_reply = CMD_REPLY_NONE;
+            queue_try_add(&i2c_msg_out_q, &cmd_reply);
             break;
         }
-        case I2C_SLAVE_REQUEST: // master is requesting data
-            i2c_write_raw_blocking(i2c0, i2c_data_out_buf, buffer_size);
+        case I2C_SLAVE_REQUEST: {
+            if (!transfer_in_progress) {
+                if (!queue_try_remove(&i2c_msg_out_q, &cmd_reply)) {
+                    goto empty_reply;
+                }
+            } else {
+                cmd_reply = CMD_REPLY_DATA;
+            }
+            
+            if (cmd_reply == CMD_REPLY_OK) {
+                i2c_write((uint8_t *) &cmd_reply, 2);
+            } else if (cmd_reply == CMD_REPLY_DATA) {
+                if (!transfer_in_progress) {
+                    transfer_in_progress = 1;
+
+#ifdef DEBUG_MODE
+                    i2c_transfer_audio_start_us = get_absolute_time();
+#endif
+                    
+                    if (adc_current_buf_index_streaming < 0 || adc_current_buf_index_streaming >= MAX_BUFFERS) {
+                        adc_current_buf_index_streaming = 0;
+                    }
+                    adc_streamed_count++;
+                }
+
+                bytes_available = i2c_get_write_available(i2c0);
+                if (!bytes_available) {
+                    break;
+                }
+                bytes_available = (buffer_size - bytes_sent) > bytes_available ? bytes_available : (buffer_size - bytes_sent);
+                i2c_write((uint8_t *) adc_samples_buf[adc_current_buf_index_streaming] + bytes_sent, bytes_available);
+                bytes_sent += bytes_available;
+                // DEBUG("Bytes sent: %d\n", bytes_sent);
+                
+                if (bytes_sent == buffer_size) {
+#ifdef DEBUG_MODE
+                    i2c_transfer_audio_duration_us = absolute_time_diff_us(i2c_transfer_audio_start_us, get_absolute_time());
+#endif
+                    transfer_in_progress = 0;
+                    bytes_sent = 0;
+                    adc_current_buf_index_streaming++;
+                }
+            } else {
+                goto empty_reply;
+            }
+            
+            cmd_reply = 0;
             break;
-        case I2C_SLAVE_FINISH: // master has signalled Stop / Restart
-            // context.mem_address_written = false;
+
+empty_reply:
+            i2c_write((uint8_t *) &cmd_none_reply, 2);
             break;
+        }
+
         default:
             break;
     }
 }
 
-void audio_transport_init(uint8_t gpio_ready_pin) {
+void audio_process_master_cmd() {
+    uint16_t master_cmd = 0;
+    uint16_t cmd_reply = CMD_REPLY_NONE;
+    queue_remove_blocking(&i2c_msg_in_q, &master_cmd);
+    
+    uint8_t cmd = master_cmd >> 8;
+    
+    if ((cmd == CMD_AUDIO_ENABLE) && !initialized) {
+        audio_init((sample_rate_t) (master_cmd & 0xff));
+        return;
+    }
+
+    if ((cmd == CMD_AUDIO_DISABLE) && initialized) {
+        audio_deinit();
+        return;
+    }
+    
+    if (cmd == CMD_AUDIO_RECEIVE) {
+        if (!dac_streaming && dac_received_count >= 4) {
+            dac_streaming = 1;
+            audio_dac_dma_isr();
+        }
+#ifdef DEBUG_MODE
+        if (sent_dac_counter++ % 500 == 0 && dac_current_buf_index_streaming > -1) {
+            DEBUG("DAC Data transfered. Sampling duration: %lld us. Receive duration: %lld\n", dac_sampling_duration_us, i2c_receive_audio_duration_us);
+        }
+#endif
+        return;
+    }
+    
+    if (cmd == CMD_AUDIO_TRANSMIT) {
+#ifdef DEBUG_MODE
+        if (sent_adc_counter++ % 500 == 0 && adc_samples_buf_index > -1) {
+            DEBUG("ADC Data transfered. Sampling duration: %lld us. Transfer duration: %lld\n", adc_sampling_duration_us, i2c_transfer_audio_duration_us);
+        }
+#endif
+        return;
+    }
+}
+
+void audio_transport_init() {
     DEBUG("Initializing audio transport\n");
-    data_ready_pin = gpio_ready_pin;
+
+    queue_init(&i2c_msg_in_q, sizeof(uint16_t), 8);
+    queue_init(&i2c_msg_out_q, sizeof(uint16_t), 8);
+
 
     // I2C
     gpio_init(I2C_SDA_PIN);
@@ -258,7 +427,7 @@ void audio_transport_init(uint8_t gpio_ready_pin) {
     gpio_pull_up(I2C_SCL_PIN);
     
     i2c_init(i2c0, I2C_BAUDRATE);
-    i2c_slave_init(i2c0, I2C_ADDRESS, &i2c_slave_handler);
+    i2c_slave_init(i2c0, I2C_ADDRESS, i2c_slave_handler);
     DEBUG("Initialized I2C\n");
 
     // SPI
@@ -269,11 +438,10 @@ void audio_transport_init(uint8_t gpio_ready_pin) {
     gpio_set_function(SPI_DAC_SCLK_PIN, GPIO_FUNC_SPI);
     gpio_set_function(SPI_DAC_CS_PIN, GPIO_FUNC_SPI);
 
-    queue_init(&i2c_msg_q, sizeof(uint8_t), 1);
-
     // Silence please
     gpio_put(SPI_DAC_CS_PIN, 1);
     DEBUG("Initialized SPI\n");
+    
 }
 
 static void init_audio_sine_dma() {
@@ -405,16 +573,8 @@ static void init_audio_dac_dma() {
     DEBUG("Initialized DAC\n");
 }
 
-void audio_init() {
+void audio_init(sample_rate_t sample_rate) {
     DEBUG("Initializing ADC\n");
-
-    uint16_t sample_rate = 0;
-
-    gpio_put(data_ready_pin, 1);
-    gpio_put(data_ready_pin, 0);
-    sleep_ms(5);
-    
-    queue_remove_blocking(&i2c_msg_q, &sample_rate);
 
     DEBUG("Sample rate raw value: %d\n", sample_rate);
     assert(sample_rate == SAMPLE_RATE_16KHZ || sample_rate == SAMPLE_RATE_8KHZ);
@@ -453,11 +613,6 @@ void audio_init() {
         memset(dac_samples_buf[i], 0, buffer_size);
     }
     
-    i2c_data_out_buf = malloc(buffer_size);
-    assert(i2c_data_out_buf != NULL);
-
-    queue_init(&samples_ready_q, sizeof(uint8_t *), 8);
-
     init_audio_adc_dma();
     // init_audio_sine_dma();
     init_audio_dac_dma();
@@ -466,9 +621,11 @@ void audio_init() {
     adc_start_sampling_us = get_absolute_time();
 #endif
 
-    configured = 1;
+    initialized = 1;
     audio_adc_dma_isr();
-    adc_run(true);
+    if (!sinewave_enabled) {
+        adc_run(true);
+    }
 }
 
 void audio_deinit() {
@@ -501,9 +658,6 @@ void audio_deinit() {
     }
     
     // Free buffers
-    queue_free(&i2c_msg_q);
-    queue_free(&samples_ready_q);
-
     for (int i = 0; i < MAX_BUFFERS; i++) {
         free(adc_samples_buf[i]);
         adc_samples_buf[i] = NULL;
@@ -512,14 +666,12 @@ void audio_deinit() {
         dac_samples_buf[i] = NULL;
     }
     
-    free(i2c_data_out_buf);
-    i2c_data_out_buf = NULL;
-    
     sinewave_buf = NULL;
     DEBUG("Freed buffers\n");
 
     adc_samples_buf_index = -1;
-    dac_samples_buf_index = 0;
+    adc_current_buf_index_streaming = -1;
+    dac_samples_buf_index = -1;
     dac_current_buf_index_streaming = -1;
 
     buffer_samples_count = 0;
@@ -528,12 +680,11 @@ void audio_deinit() {
     audio_sample_rate = SAMPLE_RATE_NONE;
     dac_streaming = 0;
     sinewave_enabled = 0;
-    configured = 0;
+    initialized = 0;
     DEBUG("Reset counters and flags\n");
 
-    gpio_put(data_ready_pin, 0);
     gpio_put(SPI_DAC_CS_PIN, 1);
-    DEBUG("Reset signal pins\n");
+    DEBUG("Reset SPI\n");
     
     // Drain I2C fifo
     size_t bytes_to_discard = i2c_get_read_available(i2c0);
