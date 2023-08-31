@@ -188,7 +188,7 @@ void audio_send(const uint8_t *buf, size_t size) {
     
     for (int i = 0; i < sample_count; i++) {
         // dst[i] = ((int16_t)(src[i] * 0.3) - INT16_MIN) >> 4;
-        dst[i] = ((int16_t)(src[i]) - INT16_MIN) >> 4;
+        dst[i] = (src[i] - INT16_MIN) >> 4;
     }
     
     xRingbufferSend(audio_out_rb, audio_out_resample_buf, size, 0);

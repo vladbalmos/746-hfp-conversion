@@ -126,11 +126,6 @@ static void __isr audio_dac_dma_isr() {
         dac_current_buf_index_streaming = 0;
     }
 
-#ifdef DEBUG_MODE
-        if (sent_dac_counter++ % 500 == 0 && dac_current_buf_index_streaming > -1) {
-            DEBUG("DAC Data transfered. Sampling duration: %lld us.\n", dac_sampling_duration_us);
-        }
-#endif
     dma_channel_set_read_addr(audio_dac_dma_chan, dac_samples_buf[dac_current_buf_index_streaming++], true);
 }
 
@@ -164,11 +159,6 @@ static void __isr audio_adc_dma_isr() {
             }
         }
 
-#ifdef DEBUG_MODE
-        if (sent_adc_counter++ % 500 == 0 && adc_samples_buf_index > -1) {
-            DEBUG("ADC Data transfered. Sampling duration: %lld us.\n", adc_sampling_duration_us);
-        }
-#endif
     }
 
     if (adc_samples_buf_index < 0 || adc_samples_buf_index >= MAX_BUFFERS) {
@@ -245,20 +235,15 @@ static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
                         receive_in_progress = 0;
                         bytes_received = 0;
                         dac_samples_buf_index++;
-                        uint16_t x = cmd << 8;
-                        queue_try_add(&i2c_msg_in_q, &x);
+                        uint16_t master_cmd = cmd << 8;
+                        queue_try_add(&i2c_msg_in_q, &master_cmd);
                     }
-
-                    // i2c_read((uint8_t *) dac_samples_buf[dac_samples_buf_index++], buffer_size);
-                    // queue_try_add(&i2c_msg_in_q, &master_cmd);
-                    // cmd_reply = CMD_REPLY_OK;
-                    // queue_try_add(&i2c_msg_out_q, &cmd_reply);
-                    // cmd_reply = CMD_REPLY_NONE;
                     break;
                 }
                 
                 if (cmd == CMD_AUDIO_TRANSMIT) {
                     cmd_reply = CMD_REPLY_DATA;
+                    queue_try_add(&i2c_msg_in_q, &master_cmd);
                     queue_try_add(&i2c_msg_out_q, &cmd_reply);
                     cmd_reply = CMD_REPLY_NONE;
                     break;
@@ -341,12 +326,20 @@ void audio_process_master_cmd() {
             dac_streaming = 1;
             audio_dac_dma_isr();
         }
-        // TODO: Log event
+#ifdef DEBUG_MODE
+        if (sent_dac_counter++ % 500 == 0 && dac_current_buf_index_streaming > -1) {
+            DEBUG("DAC Data transfered. Sampling duration: %lld us.\n", dac_sampling_duration_us);
+        }
+#endif
         return;
     }
     
     if (cmd == CMD_AUDIO_TRANSMIT) {
-        // TODO: Log event
+#ifdef DEBUG_MODE
+        if (sent_adc_counter++ % 500 == 0 && adc_samples_buf_index > -1) {
+            DEBUG("ADC Data transfered. Sampling duration: %lld us.\n", adc_sampling_duration_us);
+        }
+#endif
         return;
     }
 }
