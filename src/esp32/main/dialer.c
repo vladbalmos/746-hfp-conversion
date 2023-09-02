@@ -42,6 +42,10 @@ static inline void reset_dialed_number() {
 }
 
 static void IRAM_ATTR gpio_isr_handler(void* arg) {
+    if (irq_event_queue == NULL) {
+        return;
+    }
+
     uint32_t pin = (uint32_t) arg;
     uint32_t now = xTaskGetTickCountFromISR() * portTICK_PERIOD_MS;
     uint32_t diff_ms = now - last_irq_time_ms;
