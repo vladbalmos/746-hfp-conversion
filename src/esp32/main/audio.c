@@ -21,6 +21,7 @@
 #define AUDIO_8KHZ_SAMPLES_SIZE 120
 
 #define AUDIO_POLL_ADC_INTERVAL_US 3000
+#define AUDIO_BUFFERS_COUNT 8
 
 #define CMD_AUDIO_ENABLE 1 // enable audio
 #define CMD_AUDIO_TRANSMIT 2 // transmit PCM samples command
@@ -44,6 +45,7 @@ static esp_timer_handle_t poll_adc_timer;
 static uint8_t initialized = 0;
 static uint8_t enabled = 0;
 
+static uint64_t buffered_samples_count = 0;
 static uint8_t cmd = 0;
 
 static inline size_t get_buffer_size() {
@@ -57,7 +59,7 @@ static inline size_t get_buffer_size() {
 }
 
 static inline size_t get_rb_size() {
-    return 4 * get_buffer_size();
+    return BUFFERS_COUNT * get_buffer_size();
 }
 
 
@@ -197,6 +199,7 @@ void audio_send(const uint8_t *buf, size_t size) {
         return;
     }
     
+    static uint8_t send_threshold = AUDIO_BUFFERS_COUNT - 3;
     uint8_t cmd = CMD_AUDIO_TRANSMIT;
     int16_t *src = (int16_t *) buf;
     uint16_t *dst = (uint16_t *) audio_out_resample_buf;
@@ -209,7 +212,10 @@ void audio_send(const uint8_t *buf, size_t size) {
     
     xRingbufferSend(audio_out_rb, audio_out_resample_buf, size, 0);
     memset(audio_out_resample_buf, '\0', size);
-    xQueueSend(cmd_queue, &cmd, 0);
+    
+    if (buffered_samples_count++ >= send_threshold) {
+        xQueueSend(cmd_queue, &cmd, 0);
+    }
 }
 
 sample_rate_t audio_get_sample_rate() {
@@ -241,6 +247,7 @@ void audio_enable(uint8_t status) {
     cmd = CMD_AUDIO_DISABLE;
     xQueueSend(cmd_queue, &cmd, portMAX_DELAY);
     enabled = 0;
+    buffered_samples_count = 0;
 }
 
 void audio_init_transport() {

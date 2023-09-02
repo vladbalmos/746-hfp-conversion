@@ -117,6 +117,12 @@ static void IRAM_ATTR hf_client_audio_open(esp_hf_client_audio_state_t con_state
 static void IRAM_ATTR hf_client_audio_close() {
     audio_enabled = 0;
     audio_enable(0);
+    
+    receive_interval_us = 0;
+    send_interval_us = 0;
+    audio_ready_interval_us = 0;
+    last_incoming_buffer_us = 0;
+    last_outgoing_buffer_us = 0;
 }
 
 static void IRAM_ATTR esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {

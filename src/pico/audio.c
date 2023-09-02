@@ -244,8 +244,14 @@ static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
                 }
                 
                 if (cmd == CMD_AUDIO_TRANSMIT) {
-                    cmd_reply = CMD_REPLY_DATA;
-                    queue_try_add(&i2c_msg_in_q, &master_cmd);
+                    if (adc_sampled_count >= 3) {
+                        cmd_reply = CMD_REPLY_DATA;
+                        queue_try_add(&i2c_msg_in_q, &master_cmd);
+                    } else {
+                        cmd_reply = CMD_REPLY_NONE;
+                    }
+                    // cmd_reply = CMD_REPLY_DATA;
+                    // queue_try_add(&i2c_msg_in_q, &master_cmd);
                     queue_try_add(&i2c_msg_out_q, &cmd_reply);
                     cmd_reply = CMD_REPLY_NONE;
                     break;
@@ -331,7 +337,7 @@ void audio_process_master_cmd() {
     }
     
     if (cmd == CMD_AUDIO_RECEIVE) {
-        if (!dac_streaming) {
+        if (!dac_streaming && dac_samples_buf_index >= 3) {
             dac_streaming = 1;
             audio_dac_dma_isr();
         }
