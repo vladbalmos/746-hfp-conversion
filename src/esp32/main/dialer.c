@@ -68,7 +68,7 @@ static inline void reset_dialer_state() {
     }
 }
 
-static void signal_end_dialing_timer_callback(void *arg) {
+static void IRAM_ATTR signal_end_dialing_timer_callback(void *arg) {
     if (dialer_on_end != NULL) {
         dialer_on_end(dialed_number, dialed_digits_counter);
     }
@@ -86,7 +86,7 @@ static void check_hook_switch_state(void *arg) {
     }
 }
 
-static void signal_digit_dialed_timer_callback(void *arg) {
+static void IRAM_ATTR signal_digit_dialed_timer_callback(void *arg) {
     if (!headset_state) {
         return;
     }
@@ -167,6 +167,18 @@ static void process_irq_events(void *arg) {
     }
 }
 
+uint8_t dialer_get_headset_state() {
+    return headset_state;
+}
+
+void dialer_enable(uint8_t status) {
+    dialer_enabled = status;
+    
+    if (!status){
+        reset_dialed_number();
+    }
+}
+
 void dialer_init(gpio_num_t pin,
                  gpio_num_t hsw_power_pin,
                  gpio_num_t hsw_pin,
@@ -224,18 +236,6 @@ void dialer_init(gpio_num_t pin,
     dialer_on_end = end_callback;
     headset_state = gpio_get_level(hook_switch_pin);
     
-    BaseType_t result =  xTaskCreatePinnedToCore(process_irq_events, "dial_proc_irq_ev", 2048, NULL, 3, NULL, 0);
+    BaseType_t result =  xTaskCreatePinnedToCore(process_irq_events, "dial_proc_irq_ev", 2048, NULL, 5, NULL, 1);
     assert(result == pdPASS);
-}
-
-uint8_t dialer_get_headset_state() {
-    return headset_state;
-}
-
-void dialer_enable(uint8_t status) {
-    dialer_enabled = status;
-    
-    if (!status){
-        reset_dialed_number();
-    }
 }

@@ -64,7 +64,7 @@ void on_end_dialing(const char *number, uint8_t number_length) {
     }
 }
 
-void app_main(void) {
+static void main_task_handler(void *arg) {
     // Initialize phone interface
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT));
     
@@ -73,7 +73,6 @@ void app_main(void) {
     
     ringer_init(RINGER_ENABLE_PIN, RINGER_SIGNAL_PIN);
     ESP_LOGI(TAG, "Headset state is %d", dialer_get_headset_state());
-
     
     // Bluetooth initialization
     esp_err_t ret = nvs_flash_init();
@@ -81,7 +80,7 @@ void app_main(void) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
-    ESP_ERROR_CHECK( ret );
+    ESP_ERROR_CHECK(ret);
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
     
@@ -162,5 +161,15 @@ void app_main(void) {
                 break;
             }
         }
+    }
+
+}
+
+void app_main(void) {
+    BaseType_t r = xTaskCreatePinnedToCore(main_task_handler, "main-task", 4096, NULL, 5, NULL, 1);
+    assert(r == pdTRUE);
+    
+    while (1) {
+        vTaskDelay(1000);
     }
 }
