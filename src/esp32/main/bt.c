@@ -176,26 +176,28 @@ const char *c_inband_ring_state_str[] = {
 
 static void bt_signal_audio_ready_handler(void *arg) {
     uint8_t _;
-    uint8_t notify_counter = 0;
+
 
     while (1) {
-        if (xQueueReceive(bt_audio_data_available_queue, &_, (TickType_t)portMAX_DELAY) != pdTRUE) {
-            vTaskDelay(1);
-            continue;
-        }
-        
         if (!audio_enabled) {
             vTaskDelay(1);
             continue;
         }
 
-        
-        // Signal that audio data is available for sending
-        if (++notify_counter % 2 == 0) {
-            esp_hf_client_outgoing_data_ready();
+        if (xQueueReceive(bt_audio_data_available_queue, &_, (TickType_t)portMAX_DELAY) != pdTRUE) {
+            continue;
         }
-        if (notify_counter >= 255) {
-            notify_counter = 0;
+
+        // int64_t now = esp_timer_get_time();
+        // int64_t interval = now - last_outgoing_buffer_us;
+        // last_outgoing_buffer_us = now;
+
+        // if (send_buf_count++ % 100 == 0) {
+        //     ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64, interval);
+        // }
+
+        if (audio_enabled) {
+            esp_hf_client_outgoing_data_ready();
         }
     }
 }
@@ -217,10 +219,10 @@ bt_msg_t bt_create_msg(bt_event_type_t ev, void *data, size_t data_size) {
     return msg;
 }
 
-static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
-    int64_t now = esp_timer_get_time();
-    int64_t interval = now - last_outgoing_buffer_us;
-    last_outgoing_buffer_us = now;
+static uint32_t IRAM_ATTR bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
+    // int64_t now = esp_timer_get_time();
+    // int64_t interval = now - last_outgoing_buffer_us;
+    // last_outgoing_buffer_us = now;
     
     size_t item_size = 0;
     
@@ -234,16 +236,10 @@ static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
     return ret;
 }
 
-static void send_outgoing_message(bt_event_type_t ev, void *data, size_t data_size) {
-    bt_msg_t msg = bt_create_msg(ev, data, 0);
-    xQueueSend(bt_outgoing_msg_queue, &msg, BT_QUEUE_ADD_MAX_WAIT_TICKS / portTICK_PERIOD_MS);
-    ESP_LOGW(BT_TAG, "Sent incoming call %d", ev);
-}
-
-static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
-    int64_t now = esp_timer_get_time();
-    int64_t interval = now - last_incoming_buffer_us;
-    last_incoming_buffer_us = now;
+static void IRAM_ATTR bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
+    // int64_t now = esp_timer_get_time();
+    // int64_t interval = now - last_incoming_buffer_us;
+    // last_incoming_buffer_us = now;
     
     // if (rcv_buf_count++ % 100 == 0) {
     //     ESP_LOGI(BT_TAG, "Receive buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
@@ -252,7 +248,14 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
     audio_send(buf, size);
 }
 
-static void bt_hf_client_audio_open(esp_hf_client_audio_state_t con_state) {
+
+static void send_outgoing_message(bt_event_type_t ev, void *data, size_t data_size) {
+    bt_msg_t msg = bt_create_msg(ev, data, 0);
+    xQueueSend(bt_outgoing_msg_queue, &msg, BT_QUEUE_ADD_MAX_WAIT_TICKS / portTICK_PERIOD_MS);
+    ESP_LOGW(BT_TAG, "Sent incoming call %d", ev);
+}
+
+static void IRAM_ATTR bt_hf_client_audio_open(esp_hf_client_audio_state_t con_state) {
     sample_rate_t current_sample_rate = audio_get_sample_rate();
     sample_rate_t new_sample_rate = (con_state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) 
                                                    ? SAMPLE_RATE_16KHZ : SAMPLE_RATE_8KHZ;
@@ -263,13 +266,15 @@ static void bt_hf_client_audio_open(esp_hf_client_audio_state_t con_state) {
     }
     
     audio_enable(1);
+    audio_enabled = 1;
 }
 
-static void bt_hf_client_audio_close() {
+static void IRAM_ATTR bt_hf_client_audio_close() {
+    audio_enabled = 0;
     audio_enable(0);
 }
 
-static void esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
+static void IRAM_ATTR esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
     switch (event) {
 
         case ESP_BT_GAP_AUTH_CMPL_EVT: {
@@ -333,7 +338,7 @@ static void esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param
 }
 
 
-static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param) {
+static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param) {
     if (event <= ESP_HF_CLIENT_RING_IND_EVT) {
         ESP_LOGI(BT_TAG, "APP HFP event: %s", c_hf_evt_str[event]);
     } else {
@@ -373,10 +378,8 @@ static void esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_cli
                 } else {
                     ESP_LOGE(BT_TAG, "cvsd connection");
                 }
-                audio_enabled = 1;
                 bt_hf_client_audio_open(param->audio_stat.state);
             } else {
-                audio_enabled = 0;
                 bt_hf_client_audio_close();
             }
             
@@ -607,7 +610,7 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     bt_audio_data_available_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(bt_audio_data_available_queue != NULL);
 
-    r = xTaskCreatePinnedToCore(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 4096, NULL, 10, NULL, 0);
+    r = xTaskCreatePinnedToCore(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 4096, NULL, 5, NULL, 1);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created audio handler task");
 

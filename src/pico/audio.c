@@ -70,7 +70,7 @@ static int8_t adc_current_buf_index_streaming = -1;
 static uint64_t adc_sampled_count = 0;
 static uint64_t adc_streamed_count = 0;
 
-static int16_t *dac_samples_buf[MAX_BUFFERS] = {0};
+static uint16_t *dac_samples_buf[MAX_BUFFERS] = {0};
 static int8_t dac_samples_buf_index = -1;
 static int8_t dac_current_buf_index_streaming = -1;
 static int8_t dac_streaming = 0;
@@ -100,7 +100,6 @@ static int64_t adc_sampling_duration_us = 0;
 static uint64_t sent_dac_counter = 0;
 static absolute_time_t dac_start_sampling_us;
 static int64_t dac_sampling_duration_us = 0;
-static int64_t read_duration = 0;
 
 static absolute_time_t i2c_receive_audio_start_us;
 static int64_t i2c_receive_audio_duration_us;
@@ -343,7 +342,6 @@ static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
                 bytes_available = (buffer_size - bytes_sent) > bytes_available ? bytes_available : (buffer_size - bytes_sent);
                 i2c_write((uint8_t *) adc_samples_buf[adc_current_buf_index_streaming] + bytes_sent, bytes_available);
                 bytes_sent += bytes_available;
-                // DEBUG("Bytes sent: %d\n", bytes_sent);
                 
                 if (bytes_sent == buffer_size) {
 #ifdef DEBUG_MODE
@@ -372,7 +370,6 @@ empty_reply:
 
 void audio_process_master_cmd() {
     uint16_t master_cmd = 0;
-    uint16_t cmd_reply = CMD_REPLY_NONE;
     queue_remove_blocking(&i2c_msg_in_q, &master_cmd);
     
     uint8_t cmd = master_cmd >> 8;
@@ -468,9 +465,9 @@ static void init_audio_sine_dma() {
         dma_timer_denom = 62500;
     }
  
-    uint32_t cpu_clock_freq_hz = clock_get_hz(clk_sys);
 
 #ifdef DEBUG_MODE
+    uint32_t cpu_clock_freq_hz = clock_get_hz(clk_sys);
     float actual_sample_rate = cpu_clock_freq_hz * dma_timer_num / dma_timer_denom;
     DEBUG("Transfering data at %f hz %d %d %d %d\n", actual_sample_rate, cpu_clock_freq_hz, dma_timer_num, dma_timer_denom, audio_sample_rate);
 #endif

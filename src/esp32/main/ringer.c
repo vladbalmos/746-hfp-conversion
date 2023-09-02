@@ -1,4 +1,5 @@
 #include <inttypes.h>
+#include "freertos/FreeRTOS.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "driver/gpio.h"
@@ -35,12 +36,37 @@ static void set_duty_cycle(uint8_t duty_cycle_percentage) {
     ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0));
 }
 
-static void ringing_timer_callback(void *arg) {
+static void IRAM_ATTR ringing_timer_callback(void *arg) {
     set_duty_cycle(last_ringing_state ? 0 : 50);
     uint64_t timeout_ms = (last_ringing_state) ? RINGER_OFF_TIMEOUT_MS : RINGER_ON_TIMEOUT_MS;
     last_ringing_state = !last_ringing_state;
     
     ESP_ERROR_CHECK(esp_timer_start_once(ringing_timer, timeout_ms * 1000));
+}
+
+
+void ringer_enable(uint8_t status) {
+    uint8_t duty_cycle_percentage = (status) ? 50 : 0;
+    ringer_enabled = status;
+    
+    set_duty_cycle(duty_cycle_percentage);
+    
+    if (!status) {
+        ESP_ERROR_CHECK(ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0));
+    }
+    gpio_set_level(enable_pin, status);
+    
+    if (status) {
+        last_ringing_state = 1;
+        ESP_ERROR_CHECK(esp_timer_start_once(ringing_timer, RINGER_ON_TIMEOUT_MS * 1000));
+        return;
+    }
+    
+    esp_timer_stop(ringing_timer);
+}
+
+uint8_t ringer_get_state() {
+    return ringer_enabled;
 }
 
 void ringer_init(gpio_num_t en_pin, gpio_num_t sig_pin)
@@ -73,28 +99,4 @@ void ringer_init(gpio_num_t en_pin, gpio_num_t sig_pin)
     };
     
     ESP_ERROR_CHECK(esp_timer_create(&ringing_timer_args, &ringing_timer));
-}
-
-void ringer_enable(uint8_t status) {
-    uint8_t duty_cycle_percentage = (status) ? 50 : 0;
-    ringer_enabled = status;
-    
-    set_duty_cycle(duty_cycle_percentage);
-    
-    if (!status) {
-        ESP_ERROR_CHECK(ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0));
-    }
-    gpio_set_level(enable_pin, status);
-    
-    if (status) {
-        last_ringing_state = 1;
-        ESP_ERROR_CHECK(esp_timer_start_once(ringing_timer, RINGER_ON_TIMEOUT_MS * 1000));
-        return;
-    }
-    
-    esp_timer_stop(ringing_timer);
-}
-
-uint8_t ringer_get_state() {
-    return ringer_enabled;
 }
