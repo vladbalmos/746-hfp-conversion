@@ -50,7 +50,7 @@ static int audio_adc_dma_chan;
 static int audio_dac_dma_chan;
 
 static sample_rate_t audio_sample_rate;
-static int16_t *adc_samples_buf[MAX_BUFFERS] = {0};
+static uint8_t *adc_samples_buf[MAX_BUFFERS] = {0};
 static int8_t adc_samples_buf_index = -1;
 static int8_t adc_current_buf_index_streaming = -1;
 static uint64_t adc_sampled_count = 0;
@@ -102,34 +102,6 @@ static inline void i2c_write(uint8_t *src, size_t len) {
     i2c_write_raw_blocking(i2c0, src, len);
 }
 
-static void __isr apply_moving_average(int16_t *samples, size_t samples_count) {
-    if (samples_count < 3) return;  // Not enough samples for filtering
-    
-    int16_t firstSample = samples[0];
-    int16_t lastSample = samples[samples_count - 1];
-    
-    // Apply moving average filter
-    for (size_t i = 1; i < samples_count - 1; ++i) {
-        samples[i] = (samples[i - 1] + samples[i] + samples[i + 1]) / 3;
-    }
-    
-    // Edge cases: keep the first and last samples as is
-    samples[0] = firstSample;
-    samples[samples_count - 1] = lastSample; 
-}
-
-void apply_exponential_smoothing(int16_t *input, int16_t *output, int length, float alpha) {
-    if (length <= 0) return;
-  
-    // Initialize output with the first input sample
-    output[0] = input[0];
-
-    for (int i = 1; i < length; i++) {
-        // Exponential smoothing formula
-        output[i] = (int16_t)(alpha * input[i] + (1 - alpha) * output[i - 1]);
-    }
-}
-
 static void __isr audio_dac_dma_isr() {
 #ifdef DEBUG_MODE
     static absolute_time_t now;
@@ -152,6 +124,7 @@ static void __isr audio_dac_dma_isr() {
 
 static void __isr audio_adc_dma_isr() {
     static int32_t sample;
+    static int16_t *buf = NULL;
 #ifdef DEBUG_MODE
     static absolute_time_t now;
 
@@ -167,26 +140,18 @@ static void __isr audio_adc_dma_isr() {
 
     if (adc_samples_buf_index != -1) {
         adc_sampled_count++;
-        if (!sinewave_enabled) {
 
-            // DEBUG("Sampled to %d\n", adc_samples_buf_index - 1);
+        if (!sinewave_enabled) {
+            buf = (int16_t *) adc_samples_buf[adc_samples_buf_index - 1];
             for (int i = 0; i < buffer_samples_count; i++) {
-                sample = (adc_samples_buf[adc_samples_buf_index - 1][i] - ADC_SIGNAL_BIAS) * 16;
-                
+                sample = (buf[i] - ADC_SIGNAL_BIAS) * 16;
                 if (sample > INT16_MAX) {
                     sample = INT16_MAX;
                 } else if (sample < INT16_MIN) {
                     sample = INT16_MIN;
                 }
-                adc_samples_buf[adc_samples_buf_index - 1][i] = (int16_t) sample;
+                buf[i] = (int16_t) sample;
             }
-            
-            // apply_moving_average(adc_samples_buf[adc_samples_buf_index - 1], buffer_samples_count);
-            // apply_exponential_smoothing(adc_samples_buf[adc_samples_buf_index - 1], adc_samples_buf[adc_samples_buf_index], buffer_samples_count, 0.5);
-            // for (int i = 0; i < buffer_samples_count; i++) {
-            //     adc_samples_buf[adc_samples_buf_index - 1][i] = adc_samples_buf[adc_samples_buf_index][i];
-            //     adc_samples_buf[adc_samples_buf_index][i] = 0;
-            // }
         }
 
     }
@@ -197,7 +162,6 @@ static void __isr audio_adc_dma_isr() {
     if (sinewave_enabled) {
         dma_channel_set_read_addr(audio_adc_dma_chan, sinewave_buf, false);
     }
-    // DEBUG("Writing to %d\n", adc_samples_buf_index);
     dma_channel_set_write_addr(audio_adc_dma_chan, adc_samples_buf[adc_samples_buf_index++], true);
 }
 
