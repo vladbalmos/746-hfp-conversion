@@ -177,6 +177,7 @@ const char *c_inband_ring_state_str[] = {
 static void bt_signal_audio_ready_handler(void *arg) {
     uint8_t _;
 
+
     while (1) {
         if (!audio_enabled) {
             vTaskDelay(1);
@@ -187,7 +188,17 @@ static void bt_signal_audio_ready_handler(void *arg) {
             continue;
         }
 
-        esp_hf_client_outgoing_data_ready();
+        // int64_t now = esp_timer_get_time();
+        // int64_t interval = now - last_outgoing_buffer_us;
+        // last_outgoing_buffer_us = now;
+
+        // if (send_buf_count++ % 100 == 0) {
+        //     ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64, interval);
+        // }
+
+        if (audio_enabled) {
+            esp_hf_client_outgoing_data_ready();
+        }
     }
 }
 
@@ -255,9 +266,11 @@ static void IRAM_ATTR bt_hf_client_audio_open(esp_hf_client_audio_state_t con_st
     }
     
     audio_enable(1);
+    audio_enabled = 1;
 }
 
 static void IRAM_ATTR bt_hf_client_audio_close() {
+    audio_enabled = 0;
     audio_enable(0);
 }
 
@@ -365,10 +378,8 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
                 } else {
                     ESP_LOGE(BT_TAG, "cvsd connection");
                 }
-                audio_enabled = 1;
                 bt_hf_client_audio_open(param->audio_stat.state);
             } else {
-                audio_enabled = 0;
                 bt_hf_client_audio_close();
             }
             
@@ -599,7 +610,7 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     bt_audio_data_available_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(bt_audio_data_available_queue != NULL);
 
-    r = xTaskCreatePinnedToCore(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 4096, NULL, 10, NULL, 1);
+    r = xTaskCreatePinnedToCore(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 4096, NULL, 5, NULL, 1);
     assert(r == pdPASS);
     ESP_LOGI(BT_TAG, "Created audio handler task");
 
