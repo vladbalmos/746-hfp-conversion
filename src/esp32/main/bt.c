@@ -28,7 +28,10 @@ static QueueHandle_t bt_outgoing_msg_queue = NULL;
 static uint64_t rcv_buf_count = 0;
 static uint64_t send_buf_count = 0;
 static int64_t last_incoming_buffer_us = 0;
+static int64_t receive_interval_us = 0;
 static int64_t last_outgoing_buffer_us = 0;
+static int64_t send_interval_us = 0;
+static int64_t audio_ready_interval_us = 0;
 static uint8_t audio_enabled = 0;
 
 static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz);
@@ -176,6 +179,8 @@ const char *c_inband_ring_state_str[] = {
 
 static void bt_signal_audio_ready_handler(void *arg) {
     uint8_t _;
+    int64_t now;
+    int64_t last_us = 0;
 
 
     while (1) {
@@ -188,13 +193,9 @@ static void bt_signal_audio_ready_handler(void *arg) {
             continue;
         }
 
-        // int64_t now = esp_timer_get_time();
-        // int64_t interval = now - last_outgoing_buffer_us;
-        // last_outgoing_buffer_us = now;
-
-        // if (send_buf_count++ % 100 == 0) {
-        //     ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64, interval);
-        // }
+        now = esp_timer_get_time();
+        audio_ready_interval_us = now - last_us;
+        last_us = now;
 
         if (audio_enabled) {
             esp_hf_client_outgoing_data_ready();
@@ -220,31 +221,20 @@ bt_msg_t bt_create_msg(bt_event_type_t ev, void *data, size_t data_size) {
 }
 
 static uint32_t IRAM_ATTR bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
-    // int64_t now = esp_timer_get_time();
-    // int64_t interval = now - last_outgoing_buffer_us;
-    // last_outgoing_buffer_us = now;
+    int64_t now = esp_timer_get_time();
+    send_interval_us = now - last_outgoing_buffer_us;
+    last_outgoing_buffer_us = now;
     
     size_t item_size = 0;
-    
     audio_receive(p_buf, &item_size, sz);
     uint32_t ret = (item_size == sz) ? sz : 0;
-
-    // if (send_buf_count++ % 100 == 0) {
-    //     ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %"PRId32", Sample count: %"PRId32". Return value: %"PRId32, interval, sz, sz / 2, ret);
-    // }
-    
     return ret;
 }
 
 static void IRAM_ATTR bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
-    // int64_t now = esp_timer_get_time();
-    // int64_t interval = now - last_incoming_buffer_us;
-    // last_incoming_buffer_us = now;
-    
-    // if (rcv_buf_count++ % 100 == 0) {
-    //     ESP_LOGI(BT_TAG, "Receive buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
-    // }
-    
+    int64_t now = esp_timer_get_time();
+    receive_interval_us = now - last_incoming_buffer_us;
+    last_incoming_buffer_us = now;
     audio_send(buf, size);
 }
 
@@ -601,6 +591,13 @@ void bt_task_send(bt_event_type_t ev, void *data, size_t data_size) {
     xQueueSend(bt_msg_queue, &msg, BT_QUEUE_ADD_MAX_WAIT_TICKS / portTICK_PERIOD_MS);
 }
 
+static void debug(void *arg) {
+    while (1) {
+        vTaskDelay(200);
+        ESP_LOGI(BT_TAG, "Receive interval: %"PRId64" Send interval: %"PRId64" Ready interval: %"PRId64, receive_interval_us, send_interval_us, audio_ready_interval_us);
+    }
+}
+
 void bt_init(QueueHandle_t outgoing_msg_queue) {
     BaseType_t r;
     bt_outgoing_msg_queue = outgoing_msg_queue;
@@ -609,6 +606,8 @@ void bt_init(QueueHandle_t outgoing_msg_queue) {
     
     bt_audio_data_available_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(bt_audio_data_available_queue != NULL);
+    
+    xTaskCreatePinnedToCore(debug, "audio_debug", 2048, NULL, 1, NULL, 1);
 
     r = xTaskCreatePinnedToCore(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 4096, NULL, 5, NULL, 1);
     assert(r == pdPASS);

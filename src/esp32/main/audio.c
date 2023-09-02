@@ -20,7 +20,7 @@
 #define AUDIO_16KHZ_SAMPLES_SIZE 240
 #define AUDIO_8KHZ_SAMPLES_SIZE 120
 
-#define AUDIO_POLL_ADC_INTERVAL_US 5000
+#define AUDIO_POLL_ADC_INTERVAL_US 3000
 
 #define CMD_AUDIO_ENABLE 1
 #define CMD_AUDIO_TRANSMIT 2
@@ -173,6 +173,7 @@ static void cmd_task_handler(void *arg) {
                 if (xRingbufferSend(audio_in_rb, audio_in_buf, buf_size, 0) == pdTRUE) {
                     xQueueSend(audio_ready_queue, &cmd, 0);
                 }
+                memset(audio_in_buf, '\0', buf_size);
             }
         }
             
