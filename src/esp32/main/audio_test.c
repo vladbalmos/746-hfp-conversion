@@ -15,7 +15,7 @@
 static sample_rate_t sample_rate;
 static uint8_t buf[240] = {0};
 
-static void consume_audio(void *arg) {
+static void consume_audio_task_handler(void *arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
     uint8_t flag = 0;
     size_t request_bytes = (sample_rate == SAMPLE_RATE_16KHZ) ? 240 : 120;
@@ -45,7 +45,7 @@ void app_main(void) {
     sample_rate = SAMPLE_RATE_16KHZ;
     sample_rate = SAMPLE_RATE_8KHZ;
 
-    BaseType_t r = xTaskCreatePinnedToCore(consume_audio, "consume_audio", 4092, audio_queue, 5, NULL, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(consume_audio_task_handler, "consume_audio", 4092, audio_queue, 5, NULL, 1);
     assert(r == pdPASS);
 
     audio_init_transport();

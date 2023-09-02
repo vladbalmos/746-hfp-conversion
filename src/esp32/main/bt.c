@@ -16,25 +16,21 @@
 #include "bt.h"
 
 
-#define BT_TAG "BT"
+#define TAG "BT"
 #define BT_QUEUE_ADD_MAX_WAIT_TICKS 10
 #define BT_QUEUE_MAX_SIZE 16
 #define BT_DEVICE_NAME "GPO 746"
 
-static QueueHandle_t bt_msg_queue = NULL;
-static QueueHandle_t bt_audio_data_available_queue = NULL;
-static QueueHandle_t bt_outgoing_msg_queue = NULL;
+static QueueHandle_t msg_queue = NULL;
+static QueueHandle_t audio_ready_queue = NULL;
+static QueueHandle_t outgoing_msg_queue = NULL;
 
-static uint64_t rcv_buf_count = 0;
-static uint64_t send_buf_count = 0;
 static int64_t last_incoming_buffer_us = 0;
 static int64_t receive_interval_us = 0;
 static int64_t last_outgoing_buffer_us = 0;
 static int64_t send_interval_us = 0;
 static int64_t audio_ready_interval_us = 0;
 static uint8_t audio_enabled = 0;
-
-static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz);
 
 const static char *c_hf_evt_str[] = {
     "CONNECTION_STATE_EVT",              /*!< connection state changed event */
@@ -177,10 +173,11 @@ const char *c_inband_ring_state_str[] = {
     "Provided",
 };
 
-static void bt_signal_audio_ready_handler(void *arg) {
+static void audio_signal_ready_task_handler(void *arg) {
+    QueueHandle_t audio_ready_queue = (QueueHandle_t) arg;
     uint8_t _;
     int64_t now;
-    int64_t last_us = 0;
+    int64_t last_received_item_us = 0;
 
 
     while (1) {
@@ -189,13 +186,13 @@ static void bt_signal_audio_ready_handler(void *arg) {
             continue;
         }
 
-        if (xQueueReceive(bt_audio_data_available_queue, &_, (TickType_t)portMAX_DELAY) != pdTRUE) {
+        if (xQueueReceive(audio_ready_queue, &_, (TickType_t)portMAX_DELAY) != pdTRUE) {
             continue;
         }
 
         now = esp_timer_get_time();
-        audio_ready_interval_us = now - last_us;
-        last_us = now;
+        audio_ready_interval_us = now - last_received_item_us;
+        last_received_item_us = now;
 
         if (audio_enabled) {
             esp_hf_client_outgoing_data_ready();
@@ -220,7 +217,7 @@ bt_msg_t bt_create_msg(bt_event_type_t ev, void *data, size_t data_size) {
     return msg;
 }
 
-static uint32_t IRAM_ATTR bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
+static uint32_t IRAM_ATTR hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
     int64_t now = esp_timer_get_time();
     send_interval_us = now - last_outgoing_buffer_us;
     last_outgoing_buffer_us = now;
@@ -231,7 +228,7 @@ static uint32_t IRAM_ATTR bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t 
     return ret;
 }
 
-static void IRAM_ATTR bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
+static void IRAM_ATTR hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
     int64_t now = esp_timer_get_time();
     receive_interval_us = now - last_incoming_buffer_us;
     last_incoming_buffer_us = now;
@@ -241,25 +238,25 @@ static void IRAM_ATTR bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t 
 
 static void send_outgoing_message(bt_event_type_t ev, void *data, size_t data_size) {
     bt_msg_t msg = bt_create_msg(ev, data, 0);
-    xQueueSend(bt_outgoing_msg_queue, &msg, BT_QUEUE_ADD_MAX_WAIT_TICKS / portTICK_PERIOD_MS);
-    ESP_LOGW(BT_TAG, "Sent incoming call %d", ev);
+    xQueueSend(outgoing_msg_queue, &msg, BT_QUEUE_ADD_MAX_WAIT_TICKS / portTICK_PERIOD_MS);
+    ESP_LOGW(TAG, "Sent incoming call %d", ev);
 }
 
-static void IRAM_ATTR bt_hf_client_audio_open(esp_hf_client_audio_state_t con_state) {
+static void IRAM_ATTR hf_client_audio_open(esp_hf_client_audio_state_t con_state) {
     sample_rate_t current_sample_rate = audio_get_sample_rate();
     sample_rate_t new_sample_rate = (con_state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) 
                                                    ? SAMPLE_RATE_16KHZ : SAMPLE_RATE_8KHZ;
                                                    
     if (current_sample_rate != new_sample_rate) {
         audio_deinit();
-        audio_init(new_sample_rate, bt_audio_data_available_queue);
+        audio_init(new_sample_rate, audio_ready_queue);
     }
     
     audio_enable(1);
     audio_enabled = 1;
 }
 
-static void IRAM_ATTR bt_hf_client_audio_close() {
+static void IRAM_ATTR hf_client_audio_close() {
     audio_enabled = 0;
     audio_enable(0);
 }
@@ -269,22 +266,22 @@ static void IRAM_ATTR esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_ga
 
         case ESP_BT_GAP_AUTH_CMPL_EVT: {
             if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
-                ESP_LOGI(BT_TAG, "authentication success: %s", param->auth_cmpl.device_name);
-                esp_log_buffer_hex(BT_TAG, param->auth_cmpl.bda, ESP_BD_ADDR_LEN);
+                ESP_LOGI(TAG, "authentication success: %s", param->auth_cmpl.device_name);
+                esp_log_buffer_hex(TAG, param->auth_cmpl.bda, ESP_BD_ADDR_LEN);
             } else {
-                ESP_LOGE(BT_TAG, "authentication failed, status:%d", param->auth_cmpl.stat);
+                ESP_LOGE(TAG, "authentication failed, status:%d", param->auth_cmpl.stat);
             }
             break;
         }
 
         case ESP_BT_GAP_PIN_REQ_EVT: {
-            ESP_LOGI(BT_TAG, "ESP_BT_GAP_PIN_REQ_EVT min_16_digit:%d", param->pin_req.min_16_digit);
+            ESP_LOGI(TAG, "ESP_BT_GAP_PIN_REQ_EVT min_16_digit:%d", param->pin_req.min_16_digit);
             if (param->pin_req.min_16_digit) {
-                ESP_LOGI(BT_TAG, "Input pin code: 0000 0000 0000 0000");
+                ESP_LOGI(TAG, "Input pin code: 0000 0000 0000 0000");
                 esp_bt_pin_code_t pin_code = {0};
                 esp_bt_gap_pin_reply(param->pin_req.bda, true, 16, pin_code);
             } else {
-                ESP_LOGI(BT_TAG, "Input pin code: 1234");
+                ESP_LOGI(TAG, "Input pin code: 1234");
                 esp_bt_pin_code_t pin_code;
                 pin_code[0] = '1';
                 pin_code[1] = '2';
@@ -296,33 +293,33 @@ static void IRAM_ATTR esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_ga
         }
 
         case ESP_BT_GAP_CFM_REQ_EVT: {
-            ESP_LOGI(BT_TAG, "ESP_BT_GAP_CFM_REQ_EVT Please compare the numeric value: %"PRIu32, param->cfm_req.num_val);
+            ESP_LOGI(TAG, "ESP_BT_GAP_CFM_REQ_EVT Please compare the numeric value: %"PRIu32, param->cfm_req.num_val);
             esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, true);
             break;
         }
 
         case ESP_BT_GAP_KEY_NOTIF_EVT: {
-            ESP_LOGI(BT_TAG, "ESP_BT_GAP_KEY_NOTIF_EVT passkey:%"PRIu32, param->key_notif.passkey);
+            ESP_LOGI(TAG, "ESP_BT_GAP_KEY_NOTIF_EVT passkey:%"PRIu32, param->key_notif.passkey);
             break;
         }
 
         case ESP_BT_GAP_KEY_REQ_EVT: {
-            ESP_LOGI(BT_TAG, "ESP_BT_GAP_KEY_REQ_EVT Please enter passkey!");
+            ESP_LOGI(TAG, "ESP_BT_GAP_KEY_REQ_EVT Please enter passkey!");
             break;
         }
                                      
         case ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT: {
-            ESP_LOGI(BT_TAG, "ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT Disconnected");
+            ESP_LOGI(TAG, "ESP_BT_GAP_ACL_DISCONN_CMPL_STAT_EVT Disconnected");
             break;
         }
 
         case ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT: {
-            ESP_LOGI(BT_TAG, "ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT Bond removed");
+            ESP_LOGI(TAG, "ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT Bond removed");
             break;
         }
                                      
         default: {
-            ESP_LOGD(BT_TAG, "Unhandled event: %d", event);
+            ESP_LOGD(TAG, "Unhandled event: %d", event);
         }
     }
 }
@@ -330,25 +327,25 @@ static void IRAM_ATTR esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_ga
 
 static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param) {
     if (event <= ESP_HF_CLIENT_RING_IND_EVT) {
-        ESP_LOGI(BT_TAG, "APP HFP event: %s", c_hf_evt_str[event]);
+        ESP_LOGI(TAG, "APP HFP event: %s", c_hf_evt_str[event]);
     } else {
-        ESP_LOGE(BT_TAG, "APP HFP invalid event %d", event);
+        ESP_LOGE(TAG, "APP HFP invalid event %d", event);
     }
     
     switch (event) {
         case ESP_HF_CLIENT_CONNECTION_STATE_EVT: {
-            ESP_LOGI(BT_TAG, "--connection state %s, peer feats 0x%"PRIx32", chld_feats 0x%"PRIx32,
+            ESP_LOGI(TAG, "--connection state %s, peer feats 0x%"PRIx32", chld_feats 0x%"PRIx32,
                     c_connection_state_str[param->conn_stat.state],
                     param->conn_stat.peer_feat,
                     param->conn_stat.chld_feat);
             
             if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED) {
-                ESP_LOGI(BT_TAG, "Initializing dac");
-                audio_init(SAMPLE_RATE_16KHZ, bt_audio_data_available_queue);
+                ESP_LOGI(TAG, "Initializing dac");
+                audio_init(SAMPLE_RATE_16KHZ, audio_ready_queue);
                 // Disable discoverability after first pair
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
             } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
-                ESP_LOGI(BT_TAG, "DE_Initializing dac");
+                ESP_LOGI(TAG, "DE_Initializing dac");
                 audio_deinit();
                 // Re-enable discoverability
                 esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
@@ -357,20 +354,20 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
         }
                                                  
         case ESP_HF_CLIENT_AUDIO_STATE_EVT: {
-            ESP_LOGI(BT_TAG, "--audio state %s",
+            ESP_LOGI(TAG, "--audio state %s",
                     c_audio_state_str[param->audio_stat.state]);
             
             if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED ||
                 param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC)
             {
                 if (param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) {
-                    ESP_LOGW(BT_TAG, "msbc connection");
+                    ESP_LOGW(TAG, "msbc connection");
                 } else {
-                    ESP_LOGE(BT_TAG, "cvsd connection");
+                    ESP_LOGE(TAG, "cvsd connection");
                 }
-                bt_hf_client_audio_open(param->audio_stat.state);
+                hf_client_audio_open(param->audio_stat.state);
             } else {
-                bt_hf_client_audio_close();
+                hf_client_audio_close();
             }
             
             break;
@@ -378,42 +375,42 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
 
         case ESP_HF_CLIENT_BVRA_EVT:
         {
-            ESP_LOGI(BT_TAG, "--VR state %s",
+            ESP_LOGI(TAG, "--VR state %s",
                     c_vr_state_str[param->bvra.value]);
             break;
         }
 
         case ESP_HF_CLIENT_CIND_SERVICE_AVAILABILITY_EVT:
         {
-            ESP_LOGI(BT_TAG, "--NETWORK STATE %s",
+            ESP_LOGI(TAG, "--NETWORK STATE %s",
                     c_service_availability_status_str[param->service_availability.status]);
             break;
         }
 
         case ESP_HF_CLIENT_CIND_ROAMING_STATUS_EVT:
         {
-            ESP_LOGI(BT_TAG, "--ROAMING: %s",
+            ESP_LOGI(TAG, "--ROAMING: %s",
                     c_roaming_status_str[param->roaming.status]);
             break;
         }
 
         case ESP_HF_CLIENT_CIND_SIGNAL_STRENGTH_EVT:
         {
-            ESP_LOGI(BT_TAG, "-- signal strength: %d",
+            ESP_LOGI(TAG, "-- signal strength: %d",
                     param->signal_strength.value);
             break;
         }
 
         case ESP_HF_CLIENT_CIND_BATTERY_LEVEL_EVT:
         {
-            ESP_LOGI(BT_TAG, "--battery level %d",
+            ESP_LOGI(TAG, "--battery level %d",
                     param->battery_level.value);
             break;
         }
 
         case ESP_HF_CLIENT_COPS_CURRENT_OPERATOR_EVT:
         {
-            ESP_LOGI(BT_TAG, "--operator name: %s",
+            ESP_LOGI(TAG, "--operator name: %s",
                     param->cops.name);
             break;
         }
@@ -425,7 +422,7 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
             } else if (param->call.status == ESP_HF_CALL_STATUS_CALL_IN_PROGRESS) {
                 send_outgoing_message(BT_EV_CALL_IN_PROGRESS, NULL, 0);
             }
-            ESP_LOGI(BT_TAG, "--Call indicator %s",
+            ESP_LOGI(TAG, "--Call indicator %s",
                     c_call_str[param->call.status]);
             break;
         }
@@ -437,42 +434,42 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
             } else if (param->call_setup.status == ESP_HF_CALL_SETUP_STATUS_IDLE) {
                 send_outgoing_message(BT_EV_CALL_STATUS_IDLE, NULL, 0);
             }
-            ESP_LOGI(BT_TAG, "--Call setup indicator %s",
+            ESP_LOGI(TAG, "--Call setup indicator %s",
                     c_call_setup_str[param->call_setup.status]);
             break;
         }
 
         case ESP_HF_CLIENT_CIND_CALL_HELD_EVT:
         {
-            ESP_LOGI(BT_TAG, "--Call held indicator %s",
+            ESP_LOGI(TAG, "--Call held indicator %s",
                     c_call_held_str[param->call_held.status]);
             break;
         }
 
         case ESP_HF_CLIENT_BTRH_EVT:
         {
-            ESP_LOGI(BT_TAG, "--response and hold %s",
+            ESP_LOGI(TAG, "--response and hold %s",
                     c_resp_and_hold_str[param->btrh.status]);
             break;
         }
 
         case ESP_HF_CLIENT_CLIP_EVT:
         {
-            ESP_LOGI(BT_TAG, "--clip number %s",
+            ESP_LOGI(TAG, "--clip number %s",
                     (param->clip.number == NULL) ? "NULL" : (param->clip.number));
             break;
         }
 
         case ESP_HF_CLIENT_CCWA_EVT:
         {
-            ESP_LOGI(BT_TAG, "--call_waiting %s",
+            ESP_LOGI(TAG, "--call_waiting %s",
                     (param->ccwa.number == NULL) ? "NULL" : (param->ccwa.number));
             break;
         }
 
         case ESP_HF_CLIENT_CLCC_EVT:
         {
-            ESP_LOGI(BT_TAG, "--Current call: idx %d, dir %s, state %s, mpty %s, number %s",
+            ESP_LOGI(TAG, "--Current call: idx %d, dir %s, state %s, mpty %s, number %s",
                     param->clcc.idx,
                     c_call_dir_str[param->clcc.dir],
                     c_call_state_str[param->clcc.status],
@@ -483,7 +480,7 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
 
         case ESP_HF_CLIENT_VOLUME_CONTROL_EVT:
         {
-            ESP_LOGI(BT_TAG, "--volume_target: %s, volume %d",
+            ESP_LOGI(TAG, "--volume_target: %s, volume %d",
                     c_volume_control_target_str[param->volume_control.type],
                     param->volume_control.volume);
             break;
@@ -491,14 +488,14 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
 
         case ESP_HF_CLIENT_AT_RESPONSE_EVT:
         {
-            ESP_LOGI(BT_TAG, "--AT response event, code %d, cme %d",
+            ESP_LOGI(TAG, "--AT response event, code %d, cme %d",
                     param->at_response.code, param->at_response.cme);
             break;
         }
 
         case ESP_HF_CLIENT_CNUM_EVT:
         {
-            ESP_LOGI(BT_TAG, "--subscriber type %s, number %s",
+            ESP_LOGI(TAG, "--subscriber type %s, number %s",
                     c_subscriber_service_type_str[param->cnum.type],
                     (param->cnum.number == NULL) ? "NULL" : param->cnum.number);
             break;
@@ -506,20 +503,20 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
 
         case ESP_HF_CLIENT_BSIR_EVT:
         {
-            ESP_LOGI(BT_TAG, "--inband ring state %s",
+            ESP_LOGI(TAG, "--inband ring state %s",
                     c_inband_ring_state_str[param->bsir.state]);
             break;
         }
 
         case ESP_HF_CLIENT_BINP_EVT:
         {
-            ESP_LOGI(BT_TAG, "--last voice tag number: %s",
+            ESP_LOGI(TAG, "--last voice tag number: %s",
                     (param->binp.number == NULL) ? "NULL" : param->binp.number);
             break;
         }
 
         default:
-            ESP_LOGE(BT_TAG, "HF_CLIENT EVT: %d", event);
+            ESP_LOGE(TAG, "HF_CLIENT EVT: %d", event);
             break;
 
         
@@ -532,7 +529,7 @@ static void bt_init_stack() {
     ESP_ERROR_CHECK(esp_bt_gap_register_callback(esp_bt_gap_callback));
     ESP_ERROR_CHECK(esp_hf_client_register_callback(esp_bt_hf_client_callback));
     ESP_ERROR_CHECK(esp_hf_client_init());
-    ESP_ERROR_CHECK(esp_hf_client_register_data_callback(bt_hf_incoming_data_callback, bt_hf_outgoing_data_callback));
+    ESP_ERROR_CHECK(esp_hf_client_register_data_callback(hf_incoming_data_callback, hf_outgoing_data_callback));
     
     esp_bt_pin_type_t pin_type = ESP_BT_PIN_TYPE_FIXED;
     esp_bt_pin_code_t pin_code;
@@ -548,10 +545,11 @@ static void bt_init_stack() {
     audio_init_transport();
 }
 
-static void bt_msg_handler(void *arg) {
+static void msg_task_handler(void *arg) {
+    QueueHandle_t msg_queue = (QueueHandle_t) arg;
     bt_msg_t msg;
     while (1) {
-        if (xQueueReceive(bt_msg_queue, &msg, (TickType_t)portMAX_DELAY) != pdTRUE) {
+        if (xQueueReceive(msg_queue, &msg, (TickType_t)portMAX_DELAY) != pdTRUE) {
             continue;
         }
         
@@ -582,41 +580,41 @@ static void bt_msg_handler(void *arg) {
             free(msg.data);
         }
         
-        ESP_LOGI(BT_TAG, "Received message %d", msg.ev);
+        ESP_LOGI(TAG, "Received message %d", msg.ev);
     }
 }
 
 void bt_task_send(bt_event_type_t ev, void *data, size_t data_size) {
     bt_msg_t msg = bt_create_msg(ev, data, data_size);
-    xQueueSend(bt_msg_queue, &msg, BT_QUEUE_ADD_MAX_WAIT_TICKS / portTICK_PERIOD_MS);
+    xQueueSend(msg_queue, &msg, BT_QUEUE_ADD_MAX_WAIT_TICKS / portTICK_PERIOD_MS);
 }
 
-static void debug(void *arg) {
+static void debug_task_handler(void *arg) {
     while (1) {
         vTaskDelay(200);
-        ESP_LOGI(BT_TAG, "Receive interval: %"PRId64" Send interval: %"PRId64" Ready interval: %"PRId64, receive_interval_us, send_interval_us, audio_ready_interval_us);
+        ESP_LOGI(TAG, "Receive interval: %"PRId64" Send interval: %"PRId64" Ready interval: %"PRId64, receive_interval_us, send_interval_us, audio_ready_interval_us);
     }
 }
 
-void bt_init(QueueHandle_t outgoing_msg_queue) {
+void bt_init(QueueHandle_t _outgoing_msg_queue) {
     BaseType_t r;
-    bt_outgoing_msg_queue = outgoing_msg_queue;
-    bt_msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
-    assert(bt_msg_queue != NULL);
+    outgoing_msg_queue = _outgoing_msg_queue;
+    msg_queue = xQueueCreate(BT_QUEUE_MAX_SIZE, sizeof(bt_msg_t));
+    assert(msg_queue != NULL);
     
-    bt_audio_data_available_queue = xQueueCreate(8, sizeof(uint8_t));
-    assert(bt_audio_data_available_queue != NULL);
+    audio_ready_queue = xQueueCreate(8, sizeof(uint8_t));
+    assert(audio_ready_queue != NULL);
     
-    xTaskCreatePinnedToCore(debug, "audio_debug", 2048, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(debug_task_handler, "audio_debug", 2048, NULL, 1, NULL, 1);
 
-    r = xTaskCreatePinnedToCore(bt_signal_audio_ready_handler, "bt_signal_audio_rd", 4096, NULL, 5, NULL, 1);
+    r = xTaskCreatePinnedToCore(audio_signal_ready_task_handler, "bt_signal_audio_ready", 4096, audio_ready_queue, 5, NULL, 1);
     assert(r == pdPASS);
-    ESP_LOGI(BT_TAG, "Created audio handler task");
+    ESP_LOGI(TAG, "Created audio handler task");
 
-    r = xTaskCreatePinnedToCore(bt_msg_handler, "bt_msg_handler", 8192, NULL, 5, NULL, 1);
+    r = xTaskCreatePinnedToCore(msg_task_handler, "bt_msg_handler", 8192, msg_queue, 5, NULL, 1);
     assert(r == pdPASS);
-    ESP_LOGI(BT_TAG, "Created bluetooth task");
+    ESP_LOGI(TAG, "Created bluetooth task");
     
     bt_task_send(BT_EV_INITIALIZE, NULL, 0);
-    ESP_LOGD(BT_TAG, "Sent 'initialize' event to task");
+    ESP_LOGD(TAG, "Sent 'initialize' event to task");
 }

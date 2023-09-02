@@ -22,13 +22,13 @@
 
 #define AUDIO_POLL_ADC_INTERVAL_US 3000
 
-#define CMD_AUDIO_ENABLE 1
-#define CMD_AUDIO_TRANSMIT 2
+#define CMD_AUDIO_ENABLE 1 // enable audio
+#define CMD_AUDIO_TRANSMIT 2 // transmit PCM samples command
 #define CMD_AUDIO_POLL 5 // poll Pico for more audio samples
-#define CMD_AUDIO_RECEIVE 6
-#define CMD_AUDIO_DISABLE 7
+#define CMD_AUDIO_RECEIVE 6 // receive PCM samples command
+#define CMD_AUDIO_DISABLE 7 // disable audio
 
-static sample_rate_t audio_sample_rate;
+static sample_rate_t audio_sample_rate; // configured sample rate
 static QueueHandle_t audio_ready_queue = NULL;
 
 static QueueHandle_t cmd_queue = NULL;
@@ -39,9 +39,6 @@ static uint8_t *audio_out_resample_buf = NULL; // buffer holding ADC data
 static RingbufHandle_t audio_in_rb = NULL;
 static RingbufHandle_t audio_out_rb = NULL;
 
-uint8_t *i2c_tx_buffer = NULL;
-size_t i2c_tx_buffer_size = 0;
-
 static esp_timer_handle_t poll_adc_timer;
 
 static uint8_t initialized = 0;
@@ -49,7 +46,7 @@ static uint8_t enabled = 0;
 
 static uint8_t cmd = 0;
 
-static inline size_t audio_get_buffer_size() {
+static inline size_t get_buffer_size() {
     if (audio_sample_rate == SAMPLE_RATE_16KHZ) {
         return AUDIO_16KHZ_SAMPLES_SIZE;
     }
@@ -59,8 +56,8 @@ static inline size_t audio_get_buffer_size() {
     return 0;
 }
 
-static inline size_t audio_get_rb_size() {
-    return 4 * audio_get_buffer_size();
+static inline size_t get_rb_size() {
+    return 4 * get_buffer_size();
 }
 
 
@@ -77,8 +74,6 @@ static inline void drain_ringbuffer(RingbufHandle_t rb, size_t max_size) {
     }
 
     size_t received = 0;
-    size_t free_size = xRingbufferGetCurFreeSize(rb);
-    
     do {
         uint8_t *data = xRingbufferReceive(rb, &received, 0);
         if (received) {
@@ -88,28 +83,25 @@ static inline void drain_ringbuffer(RingbufHandle_t rb, size_t max_size) {
     } while (received != 0);
 }
 
-static void audio_drain_ringbuffers() {
-    size_t rb_size = audio_get_rb_size();
+static void drain_ringbuffers() {
+    size_t rb_size = get_rb_size();
     drain_ringbuffer(audio_in_rb, rb_size);
     drain_ringbuffer(audio_out_rb, rb_size);
 }
 
 static void cmd_task_handler(void *arg) {
     QueueHandle_t q = (QueueHandle_t) arg;
-    size_t buf_size = audio_get_buffer_size();
+    size_t buf_size = get_buffer_size();
     size_t received = 0;
     uint16_t i2c_cmd = 0;
     uint16_t i2c_cmd_reply = 0;
-    uint8_t *tmp_buf = NULL;
-    uint64_t send_buf_count = 0;
+    uint8_t *pcm_out = NULL;
 
     while (1) {
         if (xQueueReceive(q, &cmd, (TickType_t)portMAX_DELAY) != pdTRUE) {
             continue;
         }
 
-        // ESP_LOGW(TAG, "Command is: %d", cmd);
-        
         if (cmd == CMD_AUDIO_ENABLE) {
             // ESP_LOGW(TAG, "Setting sample rate to: %d", audio_sample_rate);
             i2c_cmd = (CMD_AUDIO_ENABLE << 8) | audio_sample_rate;
@@ -127,27 +119,27 @@ static void cmd_task_handler(void *arg) {
             assert(i2c_cmd_reply == 1);
             i2c_cmd_reply = 0;
             
-            audio_drain_ringbuffers();
+            drain_ringbuffers();
             continue;
         }
         
         if (cmd == CMD_AUDIO_TRANSMIT) {
-            tmp_buf = xRingbufferReceiveUpTo(audio_out_rb, &received, 0, buf_size);
-            if (tmp_buf == NULL) {
+            pcm_out = xRingbufferReceiveUpTo(audio_out_rb, &received, 0, buf_size);
+            if (pcm_out == NULL) {
                 continue;
             }
 
             if (received && (received != buf_size)) {
                 received = 0;
-                vRingbufferReturnItem(audio_out_rb, tmp_buf);
+                vRingbufferReturnItem(audio_out_rb, pcm_out);
                 continue;
             }
 
             i2c_cmd = CMD_AUDIO_TRANSMIT << 8;
             memcpy(audio_out_buf, &i2c_cmd, sizeof(i2c_cmd));
-            memcpy(audio_out_buf + sizeof(i2c_cmd), tmp_buf, received);
+            memcpy(audio_out_buf + sizeof(i2c_cmd), pcm_out, received);
             received = 0;
-            vRingbufferReturnItem(audio_out_rb, tmp_buf);
+            vRingbufferReturnItem(audio_out_rb, pcm_out);
 
             // ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, audio_out_buf, buf_size + sizeof(i2c_cmd), portMAX_DELAY));
             i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, audio_out_buf, buf_size + sizeof(i2c_cmd), portMAX_DELAY);
@@ -160,13 +152,12 @@ static void cmd_task_handler(void *arg) {
                 continue;
             }
 
-            // ESP_LOGW(TAG, "Poll audio: %d", i2c_cmd_reply);
             if (!i2c_cmd_reply) {
                 continue;
             }
             i2c_cmd_reply = 0;
 
-            buf_size = audio_get_buffer_size();
+            buf_size = get_buffer_size();
             i2c_cmd = CMD_AUDIO_RECEIVE << 8;
 
             if (i2c_master_write_read_device(I2C_PORT, I2C_SLAVE_ADDRESS, (uint8_t *) &i2c_cmd, 2, audio_in_buf, buf_size, portMAX_DELAY) == ESP_OK) {
@@ -258,7 +249,7 @@ void audio_init_transport() {
     cmd_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(cmd_queue != NULL);
 
-    BaseType_t r = xTaskCreatePinnedToCore(cmd_task_handler, "i2c_data_task", 4048, cmd_queue, configMAX_PRIORITIES - 3, NULL, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(cmd_task_handler, "cmd_data_task", 4048, cmd_queue, configMAX_PRIORITIES - 3, NULL, 1);
     assert(r == pdPASS);
 
     esp_timer_create_args_t poll_timer_args = {
@@ -292,7 +283,7 @@ void audio_init(sample_rate_t sample_rate, QueueHandle_t audio_ready_q) {
     audio_sample_rate = sample_rate;
     audio_ready_queue = audio_ready_q;
 
-    size_t audio_buf_size = audio_get_buffer_size();
+    size_t audio_buf_size = get_buffer_size();
     uint16_t sample_rate_hz = (sample_rate == SAMPLE_RATE_16KHZ) ? 16000 : 8000;
     ESP_LOGI(TAG, "Initializing Audio. Sample rate: %d. Buffer size: %d", sample_rate_hz, audio_buf_size);
 
@@ -309,7 +300,7 @@ void audio_init(sample_rate_t sample_rate, QueueHandle_t audio_ready_q) {
     assert(audio_out_resample_buf != NULL);
     memset(audio_out_resample_buf, '\0', audio_buf_size);
     
-    size_t audio_rb_size = audio_get_rb_size();
+    size_t audio_rb_size = get_rb_size();
     
     audio_in_rb = xRingbufferCreate(audio_rb_size, RINGBUF_TYPE_BYTEBUF);
     assert(audio_in_rb != NULL);
@@ -317,10 +308,6 @@ void audio_init(sample_rate_t sample_rate, QueueHandle_t audio_ready_q) {
     audio_out_rb = xRingbufferCreate(audio_rb_size, RINGBUF_TYPE_BYTEBUF);
     assert(audio_out_rb != NULL);
     
-    i2c_tx_buffer_size = I2C_LINK_RECOMMENDED_SIZE(audio_buf_size / 2);
-    i2c_tx_buffer = malloc(i2c_tx_buffer_size);
-    assert(i2c_tx_buffer);
-
     initialized = 1;
 }
 
@@ -347,10 +334,6 @@ void audio_deinit() {
 
     free(audio_out_resample_buf);
     audio_out_resample_buf = NULL;
-
-    free(i2c_tx_buffer);
-    i2c_tx_buffer = NULL;
-    i2c_tx_buffer_size = 0;
 
     initialized = 0;
     audio_ready_queue = NULL;

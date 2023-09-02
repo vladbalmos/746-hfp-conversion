@@ -110,7 +110,7 @@ static void IRAM_ATTR signal_digit_dialed_timer_callback(void *arg) {
     return;
 }
 
-static void process_irq_events(void *arg) {
+static void process_irq_events_task_handler(void *arg) {
     uint32_t pin;
     int64_t now;
     int64_t diff_ms;
@@ -236,6 +236,6 @@ void dialer_init(gpio_num_t pin,
     dialer_on_end = end_callback;
     headset_state = gpio_get_level(hook_switch_pin);
     
-    BaseType_t result =  xTaskCreatePinnedToCore(process_irq_events, "dial_proc_irq_ev", 2048, NULL, 5, NULL, 1);
+    BaseType_t result =  xTaskCreatePinnedToCore(process_irq_events_task_handler, "dial_proc_irq_ev", 2048, NULL, 5, NULL, 1);
     assert(result == pdPASS);
 }

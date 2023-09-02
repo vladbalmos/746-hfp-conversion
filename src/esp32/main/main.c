@@ -166,7 +166,7 @@ static void main_task_handler(void *arg) {
 }
 
 void app_main(void) {
-    BaseType_t r = xTaskCreatePinnedToCore(main_task_handler, "main-task", 4096, NULL, 5, NULL, 1);
+    BaseType_t r = xTaskCreatePinnedToCore(main_task_handler, "main", 4096, NULL, 5, NULL, 1);
     assert(r == pdTRUE);
     
     while (1) {
