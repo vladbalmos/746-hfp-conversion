@@ -227,9 +227,9 @@ static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
     audio_receive(p_buf, &item_size, sz);
     uint32_t ret = (item_size == sz) ? sz : 0;
 
-    if (send_buf_count++ % 100 == 0) {
-        ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %"PRId32", Sample count: %"PRId32". Return value: %"PRId32, interval, sz, sz / 2, ret);
-    }
+    // if (send_buf_count++ % 100 == 0) {
+    //     ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %"PRId32", Sample count: %"PRId32". Return value: %"PRId32, interval, sz, sz / 2, ret);
+    // }
     
     return ret;
 }
@@ -245,9 +245,9 @@ static void bt_hf_incoming_data_callback(const uint8_t *buf, uint32_t size) {
     int64_t interval = now - last_incoming_buffer_us;
     last_incoming_buffer_us = now;
     
-    if (rcv_buf_count++ % 100 == 0) {
-        ESP_LOGI(BT_TAG, "Receive buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
-    }
+    // if (rcv_buf_count++ % 100 == 0) {
+    //     ESP_LOGI(BT_TAG, "Receive buffer interval %"PRId64". Size: %ld, Sample count: %ld", interval, size, size / 2);
+    // }
     
     audio_send(buf, size);
 }
