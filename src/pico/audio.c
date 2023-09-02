@@ -56,7 +56,7 @@ static int8_t adc_current_buf_index_streaming = -1;
 static uint64_t adc_sampled_count = 0;
 static uint64_t adc_streamed_count = 0;
 
-static uint16_t *dac_samples_buf[MAX_BUFFERS] = {0};
+static uint8_t *dac_samples_buf[MAX_BUFFERS] = {0};
 static int8_t dac_samples_buf_index = -1;
 static int8_t dac_current_buf_index_streaming = -1;
 static int8_t dac_streaming = 0;
@@ -226,7 +226,7 @@ static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
                     if (!bytes_available) {
                         break;
                     }
-                    i2c_read((uint8_t *) dac_samples_buf[dac_samples_buf_index] + bytes_received, bytes_available);
+                    i2c_read(dac_samples_buf[dac_samples_buf_index] + bytes_received, bytes_available);
                     bytes_received += bytes_available;
 
                     if (bytes_received == buffer_size) {
@@ -286,7 +286,7 @@ static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
                     break;
                 }
                 bytes_available = (buffer_size - bytes_sent) > bytes_available ? bytes_available : (buffer_size - bytes_sent);
-                i2c_write((uint8_t *) adc_samples_buf[adc_current_buf_index_streaming] + bytes_sent, bytes_available);
+                i2c_write(adc_samples_buf[adc_current_buf_index_streaming] + bytes_sent, bytes_available);
                 bytes_sent += bytes_available;
                 
                 if (bytes_sent == buffer_size) {
