@@ -16,20 +16,6 @@
 #include "audio.h"
 #include "debug.h"
 
-// I2C Slave device (address: 32)
-// ----------------
-// Data flow:
-// 1. Read sampling rate via I2C during initialization
-// 2. Based on received sample rate, determine appropriate buffer sizes & samples count
-// 3. Configure ADC to continuous write samples via `audio_adc_dma_chan` to buffer
-// 4. `audio_adc_dma_chan` ISR gets triggered after each sample set and adds samples buffer to transmission queue
-// 5. Main loop polls transmission queue and notifies I2C master via `data_ready_pin` pulling it high
-//    when samples are available
-// 6. Master reads available PCM samples
-// 7. Master sends playback PCM samples for DAC. Samples are added to the appropriate DAC buffer
-// 8. Audio samples for playback are sent to DAC through SPI using `audio_dac_dma_chan`
-// 9. GOTO step 5
-
 // I2C
 #define I2C_BAUDRATE 1000000
 #define I2C_SDA_PIN 12
@@ -146,7 +132,7 @@ void apply_exponential_smoothing(int16_t *input, int16_t *output, int length, fl
 
 static void __isr audio_dac_dma_isr() {
 #ifdef DEBUG_MODE
-    absolute_time_t now;
+    static absolute_time_t now;
 
     if (sent_dac_counter) {
         now = get_absolute_time();
@@ -165,8 +151,9 @@ static void __isr audio_dac_dma_isr() {
 }
 
 static void __isr audio_adc_dma_isr() {
+    static int32_t sample;
 #ifdef DEBUG_MODE
-    absolute_time_t now;
+    static absolute_time_t now;
 
     if (sent_adc_counter) {
         now = get_absolute_time();
@@ -178,7 +165,6 @@ static void __isr audio_adc_dma_isr() {
     dma_hw->ints0 = 1u << audio_adc_dma_chan;
 
 
-    int32_t sample;
     if (adc_samples_buf_index != -1) {
         adc_sampled_count++;
         if (!sinewave_enabled) {
@@ -218,9 +204,9 @@ static void __isr audio_adc_dma_isr() {
 // Our handler is called from the I2C ISR, so it must complete quickly. Blocking calls /
 // printing to stdio may interfere with interrupt handling.
 static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
-    uint16_t cmd_reply = CMD_REPLY_NONE;
-    uint16_t cmd_none_reply = CMD_REPLY_NONE;
-    uint8_t cmd = 0;
+    static uint16_t cmd_reply = CMD_REPLY_NONE;
+    static uint16_t cmd_none_reply = CMD_REPLY_NONE;
+    static uint8_t cmd = 0;
 
     switch (event) {
         case I2C_SLAVE_RECEIVE: {

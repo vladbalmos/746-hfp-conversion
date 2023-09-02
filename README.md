@@ -30,15 +30,28 @@ My initial plan was to use the ESP32's ADC & DAC simultaneous, but the I've run 
 In a previous iteration of the project, both the Pico and the external DAC were connected to the ESP32 via SPI, but it struggled to keep a constant rate of sending/receiving PCM samples during an active call because each PCM sample required its own SPI transaction (both the Pico and the TLC5615 support only 2 byte transactions) - this cause horrible audio on both ends.
 
 ## Audio transmission
-The Pico is configured as a slave I2C device with an additional two GPIO input pins configured as an ENABLE pin controlled by the ESP32 and a DATA READY pin which is toggled HIGH by the Pico when samples are avalable from the ADC.
+The Pico is configured as a slave I2C device receiving and transmitting audio data at the master's request (ESP32). Data is transmitted via a basic protocol built on top of I2C which consists of 5 commands. Each command is encoded as a 16 bit uint. The first 8 MSB encode the command code and the last 8 LSB encode any arguments the command might have.  
+Commands:  
+
+* AUDIO_ENABLE  
+    Enable ADC/DAC. The sample rate is given as a parameter
+* AUDIO_DISABLE  
+    Disable ADC/DAC
+* AUDIO_POLL
+    Poll the slave for new audio data sampled by the ADC. If slave returns `true`, the AUDIO_RECEIVE command is sent to the slave to receive the PCM samples
+* AUDIO_TRANSMIT
+    Sent by the master to transmit PCM samples for playback
+* AUDIO_RECEIVE
+    Sent by the master to receive new PCM samples from the ADC
+
 Basic data flow between ESP32 and PICO:
 
-    1. (master) set ENABLE pin HIGH
-    2. (master) write sample rate via I2C
-    3. (slave) read sample rate and initialize ADC & DAC
-    4. (slave) start ADC capturing & stream data through I2C
-    5. (master) buffer the PCM samples on master
-    6. (master) send any available PCM samples to slave
+    1. (master) send AUDIO_ENABLE command
+       (slave) initialize ADC & DAC using the sample rate encoded in the command
+       (slave) respond with OK
+    2. (master) transmit any buffered PCM samples for playback (AUDIO_TRANSMIT)
+       (slave) receive PCM samples and transmit to DAC via DMA
+    3. (master) poll slave for new samples (AUDIO_POLL). If reply is OK, send AUDIO_RECEIVE command to receive new samples
 
 ## Building
 
