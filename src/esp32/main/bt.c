@@ -223,15 +223,13 @@ static uint32_t bt_hf_outgoing_data_callback(uint8_t *p_buf, uint32_t sz) {
     last_outgoing_buffer_us = now;
     
     size_t item_size = 0;
-    // size_t item_size = sz;
-    // memset(p_buf, 0, sz);
     
     audio_receive(p_buf, &item_size, sz);
     uint32_t ret = (item_size == sz) ? sz : 0;
 
-    // if (send_buf_count++ % 100 == 0) {
-    //     ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %"PRId32", Sample count: %"PRId32". Return value: %"PRId32, interval, sz, sz / 2, ret);
-    // }
+    if (send_buf_count++ % 100 == 0) {
+        ESP_LOGI(BT_TAG, "Send buffer interval %"PRId64". Size: %"PRId32", Sample count: %"PRId32". Return value: %"PRId32, interval, sz, sz / 2, ret);
+    }
     
     return ret;
 }
