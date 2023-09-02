@@ -294,12 +294,6 @@ static void __isr i2c_slave_handler(i2c_inst_t *i2c, i2c_slave_event_t event) {
                 }
                 
                 if (cmd == CMD_AUDIO_TRANSMIT) {
-                    // if (adc_sampled_count >= 4) {
-                    //     cmd_reply = CMD_REPLY_DATA;
-                    //     queue_try_add(&i2c_msg_in_q, &master_cmd);
-                    // } else {
-                    //     cmd_reply = CMD_REPLY_NONE;
-                    // }
                     cmd_reply = CMD_REPLY_DATA;
                     queue_try_add(&i2c_msg_in_q, &master_cmd);
                     queue_try_add(&i2c_msg_out_q, &cmd_reply);
@@ -391,10 +385,6 @@ void audio_process_master_cmd() {
             dac_streaming = 1;
             audio_dac_dma_isr();
         }
-        // if (!dac_streaming && dac_received_count >= 4) {
-        //     dac_streaming = 1;
-        //     audio_dac_dma_isr();
-        // }
 #ifdef DEBUG_MODE
         if (sent_dac_counter++ % 500 == 0 && dac_current_buf_index_streaming > -1) {
             DEBUG("DAC Data transfered. Sampling duration: %lld us. Receive duration: %lld\n", dac_sampling_duration_us, i2c_receive_audio_duration_us);
@@ -674,14 +664,29 @@ void audio_deinit() {
 
     adc_samples_buf_index = -1;
     adc_current_buf_index_streaming = -1;
+    adc_sampled_count = 0;
+    adc_streamed_count = 0;
+
     dac_samples_buf_index = -1;
     dac_current_buf_index_streaming = -1;
+    dac_streaming = 0;
+    dac_received_count = 0;
+    dac_streamed_count = 0;
+    
+    bytes_received = 0;
+    bytes_sent = 0;
+    bytes_available = 0;
+    
+    transfer_in_progress = 0;
+    receive_in_progress = 0;
+    current_state = AUDIO_STATE_NONE;
+    
+    master_cmd = 0;
 
     buffer_samples_count = 0;
     buffer_size = 0;
 
     audio_sample_rate = SAMPLE_RATE_NONE;
-    dac_streaming = 0;
     sinewave_enabled = 0;
     initialized = 0;
     DEBUG("Reset counters and flags\n");
