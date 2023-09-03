@@ -21,6 +21,8 @@
 #define BT_QUEUE_MAX_SIZE 16
 #define BT_DEVICE_NAME "GPO 746"
 
+#define PAIRING_TIMEOUT_US 60 * 1000 * 1000
+
 static QueueHandle_t msg_queue = NULL;
 static QueueHandle_t audio_ready_queue = NULL;
 static QueueHandle_t outgoing_msg_queue = NULL;
@@ -34,6 +36,7 @@ static uint8_t audio_enabled = 0;
 
 static uint8_t call_started = 0;
 
+static esp_timer_handle_t pairing_timer;
 
 static void audio_signal_ready_task_handler(void *arg) {
     QueueHandle_t audio_ready_queue = (QueueHandle_t) arg;
@@ -103,6 +106,11 @@ static void send_outgoing_message(bt_event_type_t ev, void *data, size_t data_si
     xQueueSend(outgoing_msg_queue, &msg, BT_QUEUE_ADD_MAX_WAIT_TICKS / portTICK_PERIOD_MS);
 }
 
+static void send_outgoing_message_from_isr(bt_event_type_t ev, void *data, size_t data_size) {
+    bt_msg_t msg = bt_create_msg(ev, data, 0);
+    xQueueSendFromISR(outgoing_msg_queue, &msg, NULL);
+}
+
 static void IRAM_ATTR hf_client_audio_open(esp_hf_client_audio_state_t con_state) {
     sample_rate_t current_sample_rate = audio_get_sample_rate();
     sample_rate_t new_sample_rate = (con_state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC) 
@@ -168,13 +176,18 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
     switch (event) {
         case ESP_HF_CLIENT_CONNECTION_STATE_EVT: {
             if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED) {
+                send_outgoing_message(BT_EV_CONNECTED, NULL, 0);
                 audio_init(SAMPLE_RATE_16KHZ, audio_ready_queue);
-                // Disable discoverability after first pair
+
+                // Disable discoverability after establishing connection
+                esp_timer_stop(pairing_timer);
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
             } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
+                send_outgoing_message(BT_EV_DISCONNECTED, NULL, 0);
                 hf_client_audio_close();
                 audio_deinit();
                 // Re-enable discoverability
+                // TODO: remove this
                 esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
             }
             break;
@@ -232,6 +245,22 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
         default:
             break;
     }
+} 
+
+static void pairing_timer_callback(void *arg) {
+    send_outgoing_message_from_isr(BT_EV_PAIRING_TIMEOUT, NULL, 0);
+}
+
+// Cancel discoverability & connectability after 1 minute if no
+// connection has been established in this interval
+static void start_pairing_countdown_timer() {
+    esp_timer_create_args_t timer_args = {
+        .callback = &pairing_timer_callback,
+        .name = "pairing-timer"
+    };
+
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &pairing_timer));
+    ESP_ERROR_CHECK(esp_timer_start_once(pairing_timer, PAIRING_TIMEOUT_US));
 }
 
 static void bt_init_stack() {
@@ -250,9 +279,6 @@ static void bt_init_stack() {
     pin_code[3] = '0';
     esp_bt_gap_set_pin(pin_type, 4, pin_code);
 
-    /* set discoverable and connectable mode, wait to be connected */
-    esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
-    
     audio_init_transport();
 }
 
@@ -269,14 +295,29 @@ static void msg_task_handler(void *arg) {
                 bt_init_stack();
                 break;
             }
+
             case BT_EV_ANSWER_CALL: {
                 esp_hf_client_answer_call();
                 break;
             }
+
             case BT_EV_CALL_HANGUP: {
                 esp_hf_client_reject_call();
                 break;
             }
+
+            case BT_EV_STOP_PAIRING: {
+                esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
+                break;
+            }
+
+            case BT_EV_ENABLE_PAIRING: {
+                send_outgoing_message(BT_EV_START_PAIRING, NULL, 0);
+                esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
+                start_pairing_countdown_timer();
+                break;
+            }
+
             case BT_EV_DIAL_NUMBER: {
                 const char *number = (char *) msg.data;
                 esp_hf_client_dial(number);

@@ -16,18 +16,38 @@
 #include "bt.h"
 #include "dialer.h"
 #include "ringer.h"
+#include "bt_state_led.h"
 
 #define TAG "MAIN"
 
 #define ESP_INTR_FLAG_DEFAULT 0
+
 #define DIALER_PULSE_PIN 15
 #define HOOK_POWER_PIN 4
 #define HOOK_SWITCH_PIN 2
 #define RINGER_SIGNAL_PIN 16
 #define RINGER_ENABLE_PIN 17
+#define ENABLE_PAIRING_PIN 18
+#define BT_STATE_LED_PIN 19
 
 static uint8_t incoming_call_alert = 0;
 static uint8_t call_in_progress = 0;
+static uint32_t last_irq_time_ms = 0;
+
+
+static void IRAM_ATTR gpio_isr_enable_pairing_handler(void* arg) {
+    QueueHandle_t q = (QueueHandle_t) arg;
+    uint32_t now = xTaskGetTickCountFromISR() * portTICK_PERIOD_MS;
+    uint32_t diff_ms = now - last_irq_time_ms;
+    last_irq_time_ms = now;
+    
+    if (diff_ms < 100) {
+        return;
+    }
+
+    bt_msg_t msg = bt_create_msg(BT_EV_PAIR_BTN_ACTIVITY, NULL, 0);
+    xQueueSendFromISR(q, &msg, NULL);
+}
 
 void on_headset_state_change(uint8_t state) {
     if (state && incoming_call_alert) {
@@ -54,9 +74,24 @@ void on_end_dialing(const char *number, uint8_t number_length) {
 }
 
 static void main_task_handler(void *arg) {
-    // Initialize phone interface
+    QueueHandle_t bt_msg_queue = xQueueCreate(10, sizeof(bt_msg_t));
+    assert(bt_msg_queue != NULL);
+
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT));
     
+    gpio_config_t input_conf = {};
+    input_conf.intr_type = GPIO_INTR_ANYEDGE;
+    input_conf.mode = GPIO_MODE_INPUT;
+    input_conf.pin_bit_mask = 1ULL << ENABLE_PAIRING_PIN;
+    input_conf.pull_up_en = 0;
+    input_conf.pull_down_en = 1;
+    ESP_ERROR_CHECK(gpio_config(&input_conf));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(ENABLE_PAIRING_PIN, gpio_isr_enable_pairing_handler, (void *) bt_msg_queue));
+    
+    // Init bluetooth connection state led
+    bt_state_led_init(BT_STATE_LED_PIN);
+
+    // Initialize phone interface
     dialer_init(DIALER_PULSE_PIN, HOOK_POWER_PIN, HOOK_SWITCH_PIN, on_headset_state_change, NULL, NULL, on_end_dialing);
     dialer_enable(1);
     
@@ -94,9 +129,6 @@ static void main_task_handler(void *arg) {
         return;
     }
     
-    QueueHandle_t bt_msg_queue = xQueueCreate(10, sizeof(bt_msg_t));
-    assert(bt_msg_queue != NULL);
-
     bt_init(bt_msg_queue);
     
     bt_msg_t msg;
@@ -148,7 +180,39 @@ static void main_task_handler(void *arg) {
                 ESP_LOGI(TAG, "Call hangup");
                 break;
             }
-                                   
+                                    
+            case BT_EV_PAIR_BTN_ACTIVITY: {
+                uint8_t btn_pressed = gpio_get_level(ENABLE_PAIRING_PIN);
+                if (btn_pressed) {
+                    bt_task_send(BT_EV_ENABLE_PAIRING, NULL, 0);
+                }
+                break;
+            }
+                                          
+            case BT_EV_START_PAIRING: {
+                bt_state_led_blink();
+                ESP_LOGW(TAG, "Start pairing");
+                break;
+            }
+
+            case BT_EV_CONNECTED: {
+                bt_state_led_on();
+                ESP_LOGW(TAG, "Connected");
+                break;
+            }
+
+            case BT_EV_PAIRING_TIMEOUT: {
+                bt_state_led_off();
+                bt_task_send(BT_EV_STOP_PAIRING, NULL, 0);
+                ESP_LOGW(TAG, "Pairing timeout");
+                break;
+            }
+            case BT_EV_DISCONNECTED: {
+                bt_state_led_off();
+                ESP_LOGW(TAG, "Disconnected");
+                break;
+            }
+
             default: {
                 ESP_LOGW(TAG, "Unhandled message %d", msg.ev);
                 break;
