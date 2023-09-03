@@ -182,6 +182,7 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
                 // Disable discoverability after establishing connection
                 esp_timer_stop(pairing_timer);
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
+                esp_hf_client_send_nrec();
             } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
                 send_outgoing_message(BT_EV_DISCONNECTED, NULL, 0);
                 hf_client_audio_close();

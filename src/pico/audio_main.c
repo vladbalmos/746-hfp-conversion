@@ -6,11 +6,11 @@
 #include "audio.h"
 #include "debug.h"
 
+#ifdef DEBUG_MODE
 #define LED_PIN PICO_DEFAULT_LED_PIN
 #define LED_TOGGLE_TIMEOUT_MS 250
 
 static bool led_state = true;
-
 static alarm_id_t led_toggle_alarm = 0;
 
 static int64_t toggle_led_alarm_callback(alarm_id_t id, void *user_data) {
@@ -19,6 +19,7 @@ static int64_t toggle_led_alarm_callback(alarm_id_t id, void *user_data) {
     led_toggle_alarm = add_alarm_in_ms(LED_TOGGLE_TIMEOUT_MS, toggle_led_alarm_callback, NULL, true);
     return 0;
 }
+#endif
 
 // Implements an audio I2C slave device at address 32
 // --------------------------------------------------
@@ -30,11 +31,13 @@ static int64_t toggle_led_alarm_callback(alarm_id_t id, void *user_data) {
 int main() {
     stdio_init_all();
     
+#ifdef DEBUG_MODE
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
     gpio_put(LED_PIN, led_state);
     
     led_toggle_alarm = add_alarm_in_ms(LED_TOGGLE_TIMEOUT_MS, toggle_led_alarm_callback, NULL, true);
+#endif
     
     // Initialize I2C & SPI
     audio_transport_init();
