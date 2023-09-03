@@ -30,8 +30,6 @@ static uint8_t incoming_call_alert = 0;
 static uint8_t call_in_progress = 0;
 
 void on_headset_state_change(uint8_t state) {
-    ESP_LOGI(TAG, "Headset state change: %d", state);
-    
     if (state && incoming_call_alert) {
         bt_task_send(BT_EV_ANSWER_CALL, NULL, 0);
         ringer_enable(0);
@@ -42,14 +40,6 @@ void on_headset_state_change(uint8_t state) {
         bt_task_send(BT_EV_CALL_HANGUP, NULL, 0);
         return;
     }
-}
-
-void on_start_dialing() {
-    ESP_LOGI(TAG, "Started dialing");
-}
-
-void on_digit(uint8_t digit) {
-    ESP_LOGI(TAG, "Dialed digit: %d", digit);
 }
 
 void on_end_dialing(const char *number, uint8_t number_length) {
@@ -67,11 +57,10 @@ static void main_task_handler(void *arg) {
     // Initialize phone interface
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT));
     
-    dialer_init(DIALER_PULSE_PIN, HOOK_POWER_PIN, HOOK_SWITCH_PIN, on_headset_state_change, on_start_dialing, on_digit, on_end_dialing);
+    dialer_init(DIALER_PULSE_PIN, HOOK_POWER_PIN, HOOK_SWITCH_PIN, on_headset_state_change, NULL, NULL, on_end_dialing);
     dialer_enable(1);
     
     ringer_init(RINGER_ENABLE_PIN, RINGER_SIGNAL_PIN);
-    ESP_LOGI(TAG, "Headset state is %d", dialer_get_headset_state());
     
     // Bluetooth initialization
     esp_err_t ret = nvs_flash_init();

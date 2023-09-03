@@ -108,17 +108,14 @@ static void cmd_task_handler(void *arg) {
         }
 
         if (cmd == CMD_AUDIO_ENABLE) {
-            // ESP_LOGW(TAG, "Setting sample rate to: %d", audio_sample_rate);
             i2c_cmd = (CMD_AUDIO_ENABLE << 8) | audio_sample_rate;
             ESP_ERROR_CHECK(i2c_master_write_read_device(I2C_PORT, I2C_SLAVE_ADDRESS, (uint8_t *) &i2c_cmd, 2, (uint8_t *) &i2c_cmd_reply, 2, portMAX_DELAY));
-            // ESP_LOGI(TAG, "Configured audio device: %d", i2c_cmd_reply);
             assert(i2c_cmd_reply == 1);
             i2c_cmd_reply = 0;
             continue;
         }
 
         if (cmd == CMD_AUDIO_DISABLE) {
-            // ESP_LOGW(TAG, "Disabling audio");
             i2c_cmd = CMD_AUDIO_DISABLE << 8;
             ESP_ERROR_CHECK(i2c_master_write_read_device(I2C_PORT, I2C_SLAVE_ADDRESS, (uint8_t *) &i2c_cmd, 2, (uint8_t *) &i2c_cmd_reply, 2, portMAX_DELAY));
             assert(i2c_cmd_reply == 1);
@@ -146,7 +143,6 @@ static void cmd_task_handler(void *arg) {
             received = 0;
             vRingbufferReturnItem(audio_out_rb, pcm_out);
 
-            // ESP_ERROR_CHECK(i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, audio_out_buf, buf_size + sizeof(i2c_cmd), portMAX_DELAY));
             i2c_master_write_to_device(I2C_PORT, I2C_SLAVE_ADDRESS, audio_out_buf, buf_size + sizeof(i2c_cmd), portMAX_DELAY);
             continue;
         }
@@ -249,8 +245,8 @@ void audio_enable(uint8_t status) {
         return;
     }
 
-    esp_timer_stop(poll_adc_timer);
     ESP_LOGW(TAG, "Disabling audio");
+    esp_timer_stop(poll_adc_timer);
     cmd = CMD_AUDIO_DISABLE;
     xQueueSend(cmd_queue, &cmd, portMAX_DELAY);
     enabled = 0;

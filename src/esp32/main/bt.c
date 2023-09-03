@@ -115,7 +115,6 @@ static void IRAM_ATTR hf_client_audio_open(esp_hf_client_audio_state_t con_state
     
     audio_enable(1);
     audio_enabled = 1;
-    ESP_LOGW(TAG, "Opening audio");
 }
 
 static void IRAM_ATTR hf_client_audio_close() {
@@ -127,7 +126,6 @@ static void IRAM_ATTR hf_client_audio_close() {
     audio_ready_interval_us = 0;
     last_incoming_buffer_us = 0;
     last_outgoing_buffer_us = 0;
-    ESP_LOGW(TAG, "Closing audio");
 }
 
 static void IRAM_ATTR esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
@@ -174,6 +172,7 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
                 // Disable discoverability after first pair
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
             } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
+                hf_client_audio_close();
                 audio_deinit();
                 // Re-enable discoverability
                 esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
@@ -291,8 +290,6 @@ static void msg_task_handler(void *arg) {
         if (msg.data) {
             free(msg.data);
         }
-        
-        ESP_LOGI(TAG, "Received message %d", msg.ev);
     }
 }
 
@@ -304,7 +301,7 @@ void bt_task_send(bt_event_type_t ev, void *data, size_t data_size) {
 static void debug_task_handler(void *arg) {
     while (1) {
         vTaskDelay(200);
-        ESP_LOGI(TAG, "Receive interval: %"PRId64" Send interval: %"PRId64" Ready interval: %"PRId64, receive_interval_us, send_interval_us, audio_ready_interval_us);
+        // ESP_LOGI(TAG, "Receive interval: %"PRId64" Send interval: %"PRId64" Ready interval: %"PRId64, receive_interval_us, send_interval_us, audio_ready_interval_us);
     }
 }
 
@@ -321,12 +318,9 @@ void bt_init(QueueHandle_t _outgoing_msg_queue) {
 
     r = xTaskCreatePinnedToCore(audio_signal_ready_task_handler, "bt_signal_audio_ready", 4096, audio_ready_queue, 5, NULL, 1);
     assert(r == pdPASS);
-    ESP_LOGI(TAG, "Created audio handler task");
 
     r = xTaskCreatePinnedToCore(msg_task_handler, "bt_msg_handler", 8192, msg_queue, 5, NULL, 1);
     assert(r == pdPASS);
-    ESP_LOGI(TAG, "Created bluetooth task");
     
     bt_task_send(BT_EV_INITIALIZE, NULL, 0);
-    ESP_LOGD(TAG, "Sent 'initialize' event to task");
 }
