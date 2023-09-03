@@ -172,7 +172,7 @@ static void cmd_task_handler(void *arg) {
     }
 }
 
-void audio_receive(uint8_t *dst, size_t *received, size_t requested_size) {
+void IRAM_ATTR audio_receive(uint8_t *dst, size_t *received, size_t requested_size) {
     if (!initialized || !enabled) {
         *received = 0;
         return;
@@ -193,7 +193,7 @@ void audio_receive(uint8_t *dst, size_t *received, size_t requested_size) {
     return;
 }
 
-void audio_send(const uint8_t *buf, size_t size) {
+void IRAM_ATTR audio_send(const uint8_t *buf, size_t size) {
     if (!initialized || !enabled) {
         return;
     }
@@ -217,7 +217,7 @@ void audio_send(const uint8_t *buf, size_t size) {
     }
 }
 
-void audio_set_volume(uint8_t vol) {
+void IRAM_ATTR audio_set_volume(uint8_t vol) {
     volume = vol / AUDIO_HFP_MAX_VOLUME;
 }
 
