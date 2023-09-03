@@ -53,7 +53,6 @@ void on_digit(uint8_t digit) {
 }
 
 void on_end_dialing(const char *number, uint8_t number_length) {
-    ESP_LOGI(TAG, "End dialing");
     if (!number_length) {
         return;
     }
@@ -134,11 +133,16 @@ static void main_task_handler(void *arg) {
                 break;
             }
 
+            case BT_EV_OUTGOING_CALL: {
+                call_in_progress = 1;
+                ESP_LOGI(TAG, "Outgoing call");
+                break;
+            }
+
             case BT_EV_CALL_STATUS_IDLE: {
                 if (ringer_get_state()) {
                     ringer_enable(0);
                 }
-                ESP_LOGI(TAG, "Call canceled");
                 incoming_call_alert = 0;
                 break;
             }

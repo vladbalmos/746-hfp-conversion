@@ -20,6 +20,8 @@
 #define AUDIO_16KHZ_SAMPLES_SIZE 240
 #define AUDIO_8KHZ_SAMPLES_SIZE 120
 
+#define AUDIO_HFP_MAX_VOLUME 14.0
+
 #define AUDIO_POLL_ADC_INTERVAL_US 3000
 #define AUDIO_BUFFERS_COUNT 8
 
@@ -39,6 +41,7 @@ static uint8_t *audio_out_buf = NULL; // buffer holding DAC data
 static uint8_t *audio_out_resample_buf = NULL; // buffer holding ADC data
 static RingbufHandle_t audio_in_rb = NULL;
 static RingbufHandle_t audio_out_rb = NULL;
+static float volume = 1.0; // max volume
 
 static esp_timer_handle_t poll_adc_timer;
 
@@ -59,7 +62,7 @@ static inline size_t get_buffer_size() {
 }
 
 static inline size_t get_rb_size() {
-    return BUFFERS_COUNT * get_buffer_size();
+    return AUDIO_BUFFERS_COUNT * get_buffer_size();
 }
 
 
@@ -207,7 +210,7 @@ void audio_send(const uint8_t *buf, size_t size) {
     uint8_t sample_count = size / 2;
     
     for (int i = 0; i < sample_count; i++) {
-        dst[i] = ((int16_t)(src[i] * 0.3) - INT16_MIN) >> 4;
+        dst[i] = ((int16_t)(src[i] * volume) - INT16_MIN) >> 4;
     }
     
     xRingbufferSend(audio_out_rb, audio_out_resample_buf, size, 0);
@@ -216,6 +219,10 @@ void audio_send(const uint8_t *buf, size_t size) {
     if (buffered_samples_count++ >= send_threshold) {
         xQueueSend(cmd_queue, &cmd, 0);
     }
+}
+
+void audio_set_volume(uint8_t vol) {
+    volume = vol / AUDIO_HFP_MAX_VOLUME;
 }
 
 sample_rate_t audio_get_sample_rate() {

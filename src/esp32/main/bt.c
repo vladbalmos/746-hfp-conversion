@@ -32,6 +32,9 @@ static int64_t send_interval_us = 0;
 static int64_t audio_ready_interval_us = 0;
 static uint8_t audio_enabled = 0;
 
+static uint8_t call_started = 0;
+
+
 static void audio_signal_ready_task_handler(void *arg) {
     QueueHandle_t audio_ready_queue = (QueueHandle_t) arg;
     uint8_t _;
@@ -112,6 +115,7 @@ static void IRAM_ATTR hf_client_audio_open(esp_hf_client_audio_state_t con_state
     
     audio_enable(1);
     audio_enabled = 1;
+    ESP_LOGW(TAG, "Opening audio");
 }
 
 static void IRAM_ATTR hf_client_audio_close() {
@@ -123,6 +127,7 @@ static void IRAM_ATTR hf_client_audio_close() {
     audio_ready_interval_us = 0;
     last_incoming_buffer_us = 0;
     last_outgoing_buffer_us = 0;
+    ESP_LOGW(TAG, "Closing audio");
 }
 
 static void IRAM_ATTR esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
@@ -161,17 +166,14 @@ static void IRAM_ATTR esp_bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_ga
     }
 }
 
-
 static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *param) {
     switch (event) {
         case ESP_HF_CLIENT_CONNECTION_STATE_EVT: {
             if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED) {
-                ESP_LOGI(TAG, "Initializing dac");
                 audio_init(SAMPLE_RATE_16KHZ, audio_ready_queue);
                 // Disable discoverability after first pair
                 esp_bt_gap_set_scan_mode(ESP_BT_NON_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
             } else if (param->conn_stat.state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
-                ESP_LOGI(TAG, "DE_Initializing dac");
                 audio_deinit();
                 // Re-enable discoverability
                 esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
@@ -184,17 +186,19 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
                 param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC)
             {
                 hf_client_audio_open(param->audio_stat.state);
-            } else {
-                hf_client_audio_close();
             }
             
             break;
         }
-
+                                            
         case ESP_HF_CLIENT_CIND_CALL_EVT:
         {
-            if (param->call.status == ESP_HF_CALL_STATUS_NO_CALLS) {
-                send_outgoing_message(BT_EV_CALL_HANGUP, NULL, 0);
+            if (param->call.status == ESP_HF_CALL_STATUS_NO_CALLS && call_started) {
+                if (call_started) {
+                    hf_client_audio_close();
+                    send_outgoing_message(BT_EV_CALL_HANGUP, NULL, 0);
+                }
+                call_started = 0;
             } else if (param->call.status == ESP_HF_CALL_STATUS_CALL_IN_PROGRESS) {
                 send_outgoing_message(BT_EV_CALL_IN_PROGRESS, NULL, 0);
             }
@@ -203,10 +207,26 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
 
         case ESP_HF_CLIENT_CIND_CALL_SETUP_EVT:
         {
+            if (param->call_setup.status == ESP_HF_CALL_SETUP_STATUS_INCOMING || param->call_setup.status == ESP_HF_CALL_SETUP_STATUS_OUTGOING_ALERTING || param->call_setup.status == ESP_HF_CALL_SETUP_STATUS_OUTGOING_DIALING) {
+                call_started = 1;
+            }
+
             if (param->call_setup.status == ESP_HF_CALL_SETUP_STATUS_INCOMING) {
                 send_outgoing_message(BT_EV_INCOMING_CALL, NULL, 0);
+            } else if (param->call_setup.status == ESP_HF_CALL_SETUP_STATUS_OUTGOING_ALERTING || param->call_setup.status == ESP_HF_CALL_SETUP_STATUS_OUTGOING_DIALING) {
+                send_outgoing_message(BT_EV_OUTGOING_CALL, NULL, 0);
             } else if (param->call_setup.status == ESP_HF_CALL_SETUP_STATUS_IDLE) {
-                send_outgoing_message(BT_EV_CALL_STATUS_IDLE, NULL, 0);
+                if (call_started) {
+                    send_outgoing_message(BT_EV_CALL_STATUS_IDLE, NULL, 0);
+                }
+            }
+            break;
+        }
+        
+        case ESP_HF_CLIENT_VOLUME_CONTROL_EVT:
+        {
+            if (param->volume_control.type == ESP_HF_VOLUME_CONTROL_TARGET_SPK) {
+                audio_set_volume((uint8_t) param->volume_control.volume);
             }
             break;
         }
