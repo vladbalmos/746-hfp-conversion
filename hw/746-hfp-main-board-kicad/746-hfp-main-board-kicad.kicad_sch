@@ -3839,7 +3839,7 @@
     )
     (pin "1" (uuid d19c5190-d957-4383-a0cc-eaa826d9ae5e))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#FLG04") (unit 1)
         )
@@ -3866,7 +3866,7 @@
     (pin "2" (uuid 7a671dea-b15f-4c7d-b79d-f926f4a93b03))
     (pin "3" (uuid 3e578ac0-6f99-4a8e-a0c1-4492bfd21062))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "RV2") (unit 1)
         )
@@ -3902,7 +3902,7 @@
     (pin "2" (uuid cbf9faec-3a3e-49f2-a722-136a9632630e))
     (pin "3" (uuid 5faa5d00-a75f-49f5-9c85-90e97fb2dd71))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "Q1") (unit 1)
         )
@@ -3927,7 +3927,7 @@
     )
     (pin "1" (uuid 0c7debe5-fa60-4031-8b54-32e5fa73448f))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR02") (unit 1)
         )
@@ -3966,7 +3966,7 @@
     (pin "8" (uuid 6f30d93a-f303-4803-9d80-d38e7d461d37))
     (pin "9" (uuid bf25feac-bad2-4781-afa1-c4d8640900c7))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J13") (unit 1)
         )
@@ -3993,7 +3993,7 @@
     (pin "6" (uuid 20820753-5043-416e-a7ec-aaaeddfae7c3))
     (pin "8" (uuid 8c13ca15-e6b6-4525-b249-a936221c0c83))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "U3") (unit 1)
         )
@@ -4019,7 +4019,7 @@
     (pin "1" (uuid 15572127-212d-435b-a970-8797ed91d798))
     (pin "2" (uuid bfdcc4d3-23de-4606-85fe-b1d240abf12f))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C4") (unit 1)
         )
@@ -4045,7 +4045,7 @@
     (pin "1" (uuid 68ba73bd-5b57-4f9d-83ee-a2026111c0c8))
     (pin "2" (uuid 580307fc-dafb-49cf-bbb2-181cf9a35456))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C13") (unit 1)
         )
@@ -4071,7 +4071,7 @@
     (pin "1" (uuid 4574d621-a0cb-4db6-b9a9-c872e31519fc))
     (pin "2" (uuid c88b04b4-43c0-4a13-a69a-1451c8adc77f))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "D1") (unit 1)
         )
@@ -4096,7 +4096,7 @@
     )
     (pin "1" (uuid e1527c6d-7b1a-4235-a875-a7af57cb7272))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#FLG06") (unit 1)
         )
@@ -4121,7 +4121,7 @@
     )
     (pin "1" (uuid 1b379630-05a5-4f90-bc11-03576ddfc92b))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR018") (unit 1)
         )
@@ -4147,7 +4147,7 @@
     (pin "1" (uuid 8a2c2a0e-ded3-4ba9-9045-0f6ef4004b3b))
     (pin "2" (uuid 24715dda-8a8a-42ee-a7a2-419a8005926f))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C6") (unit 1)
         )
@@ -4185,7 +4185,7 @@
     (pin "6" (uuid 7028dda5-4a4f-42bd-8f43-903b7efcf6ed))
     (pin "7" (uuid 5ed2854d-a5d5-4084-ac20-5a8a3f7ecf45))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "U5") (unit 1)
         )
@@ -4210,7 +4210,7 @@
     )
     (pin "1" (uuid 8c4c9ed0-c69d-4db5-8998-4780b7c9fc32))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J11") (unit 1)
         )
@@ -4235,7 +4235,7 @@
     )
     (pin "1" (uuid 7b7cb25e-5561-4503-a7f3-bd19bce39271))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR08") (unit 1)
         )
@@ -4260,7 +4260,7 @@
     )
     (pin "1" (uuid c06f8302-b806-43e7-be7f-07606e189f34))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR015") (unit 1)
         )
@@ -4285,7 +4285,7 @@
     )
     (pin "1" (uuid d1d5ef23-872f-4bf3-899c-6382c4d7222e))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR03") (unit 1)
         )
@@ -4310,7 +4310,7 @@
     )
     (pin "1" (uuid 3d68a828-994d-4449-8419-6b23555e6a62))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR011") (unit 1)
         )
@@ -4336,7 +4336,7 @@
     (pin "1" (uuid ad74b9e4-f4e0-479c-817d-4a6f05854c3e))
     (pin "2" (uuid 59f6eb55-39e0-4d3c-aa0c-b9f4c9e0cf97))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "R6") (unit 1)
         )
@@ -4361,7 +4361,7 @@
     )
     (pin "1" (uuid e36c5188-9bf7-4f1f-a42c-44af9d80ac80))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR012") (unit 1)
         )
@@ -4386,7 +4386,7 @@
     )
     (pin "1" (uuid 9db23f53-a93c-461f-9b69-c31f8c82bad1))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#FLG07") (unit 1)
         )
@@ -4418,7 +4418,7 @@
     (pin "7" (uuid 190c7021-4e77-4232-b908-22c11532aab8))
     (pin "8" (uuid b628a519-bd99-4bee-a30f-5afce9866a4d))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J17") (unit 1)
         )
@@ -4443,7 +4443,7 @@
     )
     (pin "1" (uuid 96d65bbb-0983-408e-b3c6-e47f5e335889))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J7") (unit 1)
         )
@@ -4468,7 +4468,7 @@
     )
     (pin "1" (uuid 3dbc59f5-7bd1-4da0-a08d-2218cfc16127))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR09") (unit 1)
         )
@@ -4494,7 +4494,7 @@
     (pin "1" (uuid edc35c30-fd7f-4b96-985a-568f8d87e1a8))
     (pin "2" (uuid 40c81d44-db7a-4e5b-aecc-9c31acee1165))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C8") (unit 1)
         )
@@ -4519,7 +4519,7 @@
     )
     (pin "1" (uuid 8fdbf5e3-a637-448e-b57a-3982a0f680ad))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR014") (unit 1)
         )
@@ -4545,7 +4545,7 @@
     (pin "1" (uuid 5c62fe92-b8a4-43a3-9e43-67b08a9cc392))
     (pin "2" (uuid 9581e7f5-b1b6-41a9-ab0f-41c17833b64b))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "R7") (unit 1)
         )
@@ -4571,7 +4571,7 @@
     (pin "1" (uuid bedd3d16-b8e3-4c41-948c-cd4785eca552))
     (pin "2" (uuid 218a179e-52c3-498e-baf8-028ece954180))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J15") (unit 1)
         )
@@ -4596,7 +4596,7 @@
     )
     (pin "1" (uuid 9de02661-a8c1-4923-b26d-16ebf7b4ee8e))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR06") (unit 1)
         )
@@ -4621,7 +4621,7 @@
     )
     (pin "1" (uuid 7b38399b-0ac6-47c7-b5e0-adcefd7f2abb))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J5") (unit 1)
         )
@@ -4646,7 +4646,7 @@
     )
     (pin "1" (uuid 1fa08239-29d7-44bb-b3b4-f583d05c697d))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR04") (unit 1)
         )
@@ -4671,7 +4671,7 @@
     )
     (pin "1" (uuid 4798d378-129b-4e24-9c65-97d498afab2e))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J10") (unit 1)
         )
@@ -4696,7 +4696,7 @@
     )
     (pin "1" (uuid b2b03893-dc34-4b1d-ba4d-493fddbc83de))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J2") (unit 1)
         )
@@ -4721,7 +4721,7 @@
     )
     (pin "1" (uuid 17e6df5c-8cf9-4bdb-8ff1-efe797d21a21))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J6") (unit 1)
         )
@@ -4748,7 +4748,7 @@
     (pin "2" (uuid 63dfbb73-8252-4bbe-8444-10d00b60740d))
     (pin "3" (uuid e276295e-97aa-4a86-9c08-7c6a925a3004))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "RV1") (unit 1)
         )
@@ -4780,7 +4780,7 @@
     (pin "4" (uuid d3bc56f7-7a83-498a-aeb9-e9cd835fd975))
     (pin "8" (uuid 41f9d24b-6acc-461f-b593-46dc363fc94c))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "U4") (unit 1)
         )
@@ -4806,7 +4806,7 @@
     (pin "1" (uuid 03755932-e7ad-4ce8-a129-bc89eff92936))
     (pin "2" (uuid ee89b1b3-b6c2-47fa-961c-1eaa11aa1da2))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C11") (unit 1)
         )
@@ -4831,7 +4831,7 @@
     )
     (pin "1" (uuid 6db630ff-617c-48db-a4af-6a3ef52c438e))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#FLG05") (unit 1)
         )
@@ -4867,7 +4867,7 @@
     (pin "8" (uuid eaa9263a-0685-44f5-be01-d30c1b79f810))
     (pin "9" (uuid dc68c6d1-418b-493f-9499-e0266cfc64fe))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J12") (unit 1)
         )
@@ -4892,7 +4892,7 @@
     )
     (pin "1" (uuid cbb0802e-3b89-422f-835e-e6117d462646))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J8") (unit 1)
         )
@@ -4918,7 +4918,7 @@
     (pin "1" (uuid 0fa66da8-cbbd-4dd5-985a-d4194eda709e))
     (pin "2" (uuid a18ea182-29f6-465a-bf6f-c2baaad9c271))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "R4") (unit 1)
         )
@@ -4957,7 +4957,7 @@
     (pin "8" (uuid 6c565755-895d-456a-84ee-3e9d83515198))
     (pin "9" (uuid 8970e165-5c77-4b88-bae6-407cdf8f91c6))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J14") (unit 1)
         )
@@ -4982,7 +4982,7 @@
     )
     (pin "1" (uuid 2d021097-8db4-47a8-a831-e6d36389c1b1))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J18") (unit 1)
         )
@@ -5008,7 +5008,7 @@
     (pin "1" (uuid 00fe72c9-f489-4026-9400-cdcc63a16a04))
     (pin "2" (uuid a0ecf94c-fba4-4e5b-b12a-8ce69c98795e))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "D2") (unit 1)
         )
@@ -5033,7 +5033,7 @@
     )
     (pin "1" (uuid 76b624a0-60a6-497f-8040-0336cfbce2be))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J3") (unit 1)
         )
@@ -5059,7 +5059,7 @@
     (pin "1" (uuid 72056cee-7d0c-4b23-b9a4-c2749d6b3a10))
     (pin "2" (uuid 8cbf06bb-8d0f-417c-8040-1e7618936ef4))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C9") (unit 1)
         )
@@ -5085,7 +5085,7 @@
     (pin "1" (uuid 2547dfb2-0cd3-481e-b88f-e25fc7cbef46))
     (pin "2" (uuid 63dc6a90-9efb-4af6-8784-61b58d632a59))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C10") (unit 1)
         )
@@ -5111,7 +5111,7 @@
     (pin "1" (uuid b9e48ba4-9ba3-46a9-9cdb-124ff82f5fbe))
     (pin "2" (uuid 01adb966-1c02-4a21-a4de-6cd036eca5d5))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "R3") (unit 1)
         )
@@ -5137,7 +5137,7 @@
     (pin "1" (uuid c2bfad28-35c3-42b1-aa40-618f3cd73e15))
     (pin "2" (uuid aa5b08ac-7d36-4c58-bb6c-078e98af2ead))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C12") (unit 1)
         )
@@ -5162,7 +5162,7 @@
     )
     (pin "1" (uuid c27c4f2a-0666-44fc-b669-e2f6db101840))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR010") (unit 1)
         )
@@ -5187,7 +5187,7 @@
     )
     (pin "1" (uuid a607600c-3e5a-4be0-8e8b-4216c7801ebb))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR016") (unit 1)
         )
@@ -5214,7 +5214,7 @@
     (pin "2" (uuid 0df31c48-6f6b-4333-bf0c-454b9945f6ae))
     (pin "3" (uuid 3ee61b53-0d89-4b02-9cba-f0a0b6464b90))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "RV3") (unit 1)
         )
@@ -5246,7 +5246,7 @@
     (pin "4" (uuid d3bc56f7-7a83-498a-aeb9-e9cd835fd976))
     (pin "8" (uuid 41f9d24b-6acc-461f-b593-46dc363fc94d))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "U4") (unit 2)
         )
@@ -5272,7 +5272,7 @@
     (pin "1" (uuid dd8ef1bb-9103-4bcc-a7f4-bc22db6d3943))
     (pin "2" (uuid 26c7f079-f23e-42bb-a99c-7df5ff8bb139))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C5") (unit 1)
         )
@@ -5297,7 +5297,7 @@
     )
     (pin "1" (uuid 11ad2cb4-ef58-47c3-bf07-4c03266fa83f))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J1") (unit 1)
         )
@@ -5323,7 +5323,7 @@
     (pin "1" (uuid d4375d77-326b-49ce-93f1-89f1eb921f23))
     (pin "2" (uuid 258d5f17-71f5-4fbf-9585-8b3725d46f3e))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C3") (unit 1)
         )
@@ -5348,7 +5348,7 @@
     )
     (pin "1" (uuid 60ef9ad7-8bc9-4faf-9422-b821ad07b0a6))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J4") (unit 1)
         )
@@ -5373,7 +5373,7 @@
     )
     (pin "1" (uuid cd9009e3-6f50-45b2-a0da-2ae2473f6795))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR013") (unit 1)
         )
@@ -5399,7 +5399,7 @@
     (pin "1" (uuid a522baa9-e9b7-401a-ab85-51dd2d6e899b))
     (pin "2" (uuid 0e0e907f-bd05-40fc-9fe8-146ee90414f5))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C1") (unit 1)
         )
@@ -5425,7 +5425,7 @@
     (pin "1" (uuid db65cda7-5519-46da-99c6-5c6ae5cae5f1))
     (pin "2" (uuid 272781c7-01d7-4244-92ea-cbfd7338483a))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "C2") (unit 1)
         )
@@ -5451,7 +5451,7 @@
     (pin "1" (uuid 0a32b20a-68d4-4a98-ac4e-d0cbb212db91))
     (pin "2" (uuid eabffa8c-834c-43ac-b3f1-68a4d1936b98))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "R5") (unit 1)
         )
@@ -5483,7 +5483,7 @@
     (pin "4" (uuid d3bc56f7-7a83-498a-aeb9-e9cd835fd977))
     (pin "8" (uuid 41f9d24b-6acc-461f-b593-46dc363fc94e))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "U4") (unit 3)
         )
@@ -5508,7 +5508,7 @@
     )
     (pin "1" (uuid bd660dba-d3de-4e62-85f4-739833c2c797))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "#PWR01") (unit 1)
         )
@@ -5533,7 +5533,7 @@
     )
     (pin "1" (uuid 5153c99f-925b-4c41-909c-92b4113fa201))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "J9") (unit 1)
         )
@@ -5600,27 +5600,10 @@
     (pin "8" (uuid a91a231c-c96e-476c-88db-f6cc81134aa6))
     (pin "9" (uuid b46c3483-a207-463f-a331-4ea5a5679532))
     (instances
-      (project "746-hfp-kicad"
+      (project "746-hfp-main-board-kicad"
         (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8"
           (reference "U2") (unit 1)
         )
-      )
-    )
-  )
-
-  (sheet (at 73.66 15.24) (size 43.688 21.336) (fields_autoplaced)
-    (stroke (width 0.1524) (type solid))
-    (fill (color 0 0 0 0.0000))
-    (uuid fd292375-b2d0-42b0-a9bf-fe6efca57957)
-    (property "Sheetname" "Control board" (at 73.66 14.5284 0)
-      (effects (font (size 1.27 1.27)) (justify left bottom))
-    )
-    (property "Sheetfile" "GPO-746-bt-control-board.kicad_sch" (at 73.66 37.1606 0)
-      (effects (font (size 1.27 1.27)) (justify left top))
-    )
-    (instances
-      (project "746-hfp-kicad"
-        (path "/a73d1afc-f0a5-418c-8247-1028a7b305b8" (page "2"))
       )
     )
   )
