@@ -11,8 +11,8 @@
         "copper_text_thickness": 0.3,
         "copper_text_upright": false,
         "courtyard_line_width": 0.049999999999999996,
-        "dimension_precision": 4,
-        "dimension_units": 3,
+        "dimension_precision": 2,
+        "dimension_units": 2,
         "dimensions": {
           "arrow_length": 1270000,
           "extension_offset": 500000,
@@ -34,9 +34,9 @@
         "other_text_thickness": 0.15,
         "other_text_upright": false,
         "pads": {
-          "drill": 0.762,
-          "height": 1.524,
-          "width": 1.524
+          "drill": 0.8,
+          "height": 1.5,
+          "width": 1.5
         },
         "silk_line_width": 0.15,
         "silk_text_italic": false,
@@ -48,8 +48,21 @@
           "min_clearance": 0.5
         }
       },
-      "diff_pair_dimensions": [],
-      "drc_exclusions": [],
+      "diff_pair_dimensions": [
+        {
+          "gap": 0.0,
+          "via_gap": 0.0,
+          "width": 0.0
+        }
+      ],
+      "drc_exclusions": [
+        "courtyards_overlap|139719999|92740001|1b6719cc-a19b-44a0-b478-f318bcd69159|1cea6973-b93e-40a2-973d-b67eb811ca0c",
+        "courtyards_overlap|139719999|95280001|1cea6973-b93e-40a2-973d-b67eb811ca0c|a45827ea-9abb-441c-a7bc-421813656aff",
+        "courtyards_overlap|139719999|97820001|6f790d22-2587-4089-a6fb-581e6407dd8b|a45827ea-9abb-441c-a7bc-421813656aff",
+        "courtyards_overlap|166719999|92740001|1a8e9c63-e198-42f5-a3fc-8342be8fceb0|c9057b14-a786-400c-9391-39f0a3496b91",
+        "courtyards_overlap|166719999|95280001|d5f996d0-1c87-40a0-9aaf-839c1f91be9d|1a8e9c63-e198-42f5-a3fc-8342be8fceb0",
+        "courtyards_overlap|166719999|97820001|d5f996d0-1c87-40a0-9aaf-839c1f91be9d|471e56c7-d739-4872-a6b7-a5865ba5bcc9"
+      ],
       "meta": {
         "version": 2
       },
@@ -165,8 +178,25 @@
           "td_width_to_size_filter_ratio": 0.9
         }
       ],
-      "track_widths": [],
-      "via_dimensions": [],
+      "track_widths": [
+        0.0,
+        1.0,
+        2.0
+      ],
+      "via_dimensions": [
+        {
+          "diameter": 0.0,
+          "drill": 0.0
+        },
+        {
+          "diameter": 1.0,
+          "drill": 0.7
+        },
+        {
+          "diameter": 2.0,
+          "drill": 1.0
+        }
+      ],
       "zones_allow_external_fillets": false
     },
     "layer_presets": [],
@@ -412,9 +442,9 @@
         "name": "Default",
         "pcb_color": "rgba(0, 0, 0, 0.000)",
         "schematic_color": "rgba(0, 0, 0, 0.000)",
-        "track_width": 0.25,
-        "via_diameter": 0.8,
-        "via_drill": 0.4,
+        "track_width": 1.0,
+        "via_diameter": 1.0,
+        "via_drill": 0.7,
         "wire_width": 6
       }
     ],

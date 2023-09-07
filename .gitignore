@@ -3,3 +3,4 @@ debug
 bt-debug
 .vscode
 *.zip
+*kicad-backups/*
