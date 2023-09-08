@@ -199,6 +199,9 @@ static void IRAM_ATTR esp_bt_hf_client_callback(esp_hf_client_cb_event_t event, 
                 param->audio_stat.state == ESP_HF_CLIENT_AUDIO_STATE_CONNECTED_MSBC)
             {
                 hf_client_audio_open(param->audio_stat.state);
+            } else {
+                // Suspend audio, don't fully disable the Pico
+                audio_enabled = 0;
             }
             
             break;
@@ -343,7 +346,7 @@ void bt_task_send(bt_event_type_t ev, void *data, size_t data_size) {
 static void debug_task_handler(void *arg) {
     while (1) {
         vTaskDelay(200);
-        // ESP_LOGI(TAG, "Receive interval: %"PRId64" Send interval: %"PRId64" Ready interval: %"PRId64, receive_interval_us, send_interval_us, audio_ready_interval_us);
+        ESP_LOGI(TAG, "Audio enabled: %d Receive interval: %"PRId64" Send interval: %"PRId64" Ready interval: %"PRId64, audio_enabled, receive_interval_us, send_interval_us, audio_ready_interval_us);
     }
 }
 
@@ -356,7 +359,7 @@ void bt_init(QueueHandle_t _outgoing_msg_queue) {
     audio_ready_queue = xQueueCreate(8, sizeof(uint8_t));
     assert(audio_ready_queue != NULL);
     
-    xTaskCreatePinnedToCore(debug_task_handler, "audio_debug", 2048, NULL, 1, NULL, 1);
+    // xTaskCreatePinnedToCore(debug_task_handler, "audio_debug", 2048, NULL, 1, NULL, 1);
 
     r = xTaskCreatePinnedToCore(audio_signal_ready_task_handler, "bt_signal_audio_ready", 4096, audio_ready_queue, 5, NULL, 1);
     assert(r == pdPASS);
