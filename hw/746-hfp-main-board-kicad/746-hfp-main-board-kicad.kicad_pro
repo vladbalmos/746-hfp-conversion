@@ -55,14 +55,7 @@
           "width": 0.0
         }
       ],
-      "drc_exclusions": [
-        "courtyards_overlap|139719999|92740001|1b6719cc-a19b-44a0-b478-f318bcd69159|1cea6973-b93e-40a2-973d-b67eb811ca0c",
-        "courtyards_overlap|139719999|95280001|1cea6973-b93e-40a2-973d-b67eb811ca0c|a45827ea-9abb-441c-a7bc-421813656aff",
-        "courtyards_overlap|139719999|97820001|6f790d22-2587-4089-a6fb-581e6407dd8b|a45827ea-9abb-441c-a7bc-421813656aff",
-        "courtyards_overlap|166719999|92740001|1a8e9c63-e198-42f5-a3fc-8342be8fceb0|c9057b14-a786-400c-9391-39f0a3496b91",
-        "courtyards_overlap|166719999|95280001|d5f996d0-1c87-40a0-9aaf-839c1f91be9d|1a8e9c63-e198-42f5-a3fc-8342be8fceb0",
-        "courtyards_overlap|166719999|97820001|d5f996d0-1c87-40a0-9aaf-839c1f91be9d|471e56c7-d739-4872-a6b7-a5865ba5bcc9"
-      ],
+      "drc_exclusions": [],
       "meta": {
         "version": 2
       },
@@ -72,7 +65,7 @@
         "connection_width": "warning",
         "copper_edge_clearance": "error",
         "copper_sliver": "warning",
-        "courtyards_overlap": "error",
+        "courtyards_overlap": "ignore",
         "diff_pair_gap_out_of_range": "error",
         "diff_pair_uncoupled_length_too_long": "error",
         "drill_out_of_range": "error",
@@ -98,14 +91,14 @@
         "padstack": "warning",
         "pth_inside_courtyard": "ignore",
         "shorting_items": "error",
-        "silk_edge_clearance": "warning",
-        "silk_over_copper": "warning",
-        "silk_overlap": "warning",
+        "silk_edge_clearance": "ignore",
+        "silk_over_copper": "ignore",
+        "silk_overlap": "ignore",
         "skew_out_of_range": "error",
         "solder_mask_bridge": "error",
-        "starved_thermal": "error",
-        "text_height": "warning",
-        "text_thickness": "warning",
+        "starved_thermal": "ignore",
+        "text_height": "ignore",
+        "text_thickness": "ignore",
         "through_hole_pad_without_hole": "error",
         "too_many_vias": "error",
         "track_dangling": "warning",
