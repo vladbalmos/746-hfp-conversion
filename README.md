@@ -55,6 +55,8 @@ Basic data flow between ESP32 and PICO:
 
 ## Building
 
+The boards need to be separately flashed using the code in `src`.
+
 ### esp32
 
     cd src/esp32
@@ -72,3 +74,9 @@ If using picoprobe and opencd:
     make install
 
 If not using picoprobe & opencd just build and flash using the manual steps provided in the getting started pico-sdk guide
+
+## PCBs
+The device is split into two PCBs, a main board and a control board. The main board houses all the relevant components for bluetooth and audio while the control board contains the indicator LEDs and a microswitch for toggling bluetooth pairing. The schematics and PCB designs were done using KiCad, all documents are inside the `hw` folder. I designed the main board to be single sided, but the pcb design file contains traces and vias for a two sided board only to pass DRC validation and given that I manually trace and etch my PCBs I cannot guarantee that the final designs are good enough for sending to a PCB manufacturer. Inspect the designs and tweak accordingly before ordering a set of boards. You can find some pictures of the boards in the `img` folder. 
+
+A 3d printed case model will be available in the future inside `hw/3d-prints`.
+
