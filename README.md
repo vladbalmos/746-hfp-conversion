@@ -53,6 +53,23 @@ Basic data flow between ESP32 and PICO:
        (slave) receive PCM samples and transmit to DAC via DMA
     3. (master) poll slave for new samples (AUDIO_POLL). If reply is OK, send AUDIO_RECEIVE command to receive new samples
 
+## Functions
+
+Almost all the existing features of the GPO 746 are preserved once paired via Bluetooth HFP:
+
+* Ringing works when an incoming call is detected. The ringer is driven by a AC coupled PWM 20hz signal amplified to 34V using a DC-DC voltage booster module.
+* Earpiece / microphone
+* Dialing via the rotary dialer works as expected
+
+Visual indicator LEDs available for:
+
+* power
+* ringing
+* bluetooth connection state
+* handset on/off hook
+
+A schematic on how to physically connect the phone to the board will be added soon.
+
 ## Building
 
 The boards need to be separately flashed using the code in `src`.
