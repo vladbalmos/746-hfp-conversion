@@ -1,13 +1,13 @@
 ## British GPO 746 bluetooth conversion (HFP)
 
-Firmware and hardware related resources to add hands-free bluetooth support to a 746 british phone - WIP.
+Firmware and hardware related resources to add hands-free bluetooth support to a 746 british phone.
 
 ## Hardware requirements
 
 * esp32 devboard (v1)
 * Raspberry PI Pico
 * external DAC (TLC5615)
-* 746 telephone
+* GPO 746 telephone
 
 ## Software dependencies
 

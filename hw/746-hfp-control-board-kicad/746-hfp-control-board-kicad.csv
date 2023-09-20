@@ -1,0 +1,16 @@
+"Source:","/home/vlad/Development/hw/esp32/projects/746-bt-conversion/hw/746-hfp-control-board-kicad/746-hfp-control-board-kicad.kicad_sch"
+"Date:","Wed 20 Sep 2023 21:17:07 EEST"
+"Tool:","Eeschema 7.0.7-7.0.7~ubuntu22.04.1"
+"Generator:","/usr/share/kicad/plugins/bom_csv_grouped_by_value.py"
+"Component Count:","11"
+
+"Collated Components:"
+
+"Item","Qty","Reference(s)","Value","LibPart","Footprint","Datasheet","DNP"
+"1","4","D1, D2, D3, D4","LED","Device:LED","LED_THT:LED_D5.0mm","~",""
+"2","1","J1","Control_board_Connector","Connector:Conn_01x08_Socket","Connector_PinSocket_2.54mm:PinSocket_1x08_P2.54mm_Vertical","~",""
+"3","2","R1, R3","220","Device:R","Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal","~",""
+"4","1","R2","2k","Device:R","Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal","~",""
+"5","1","R4","1k","Device:R","Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal","~",""
+"6","1","SW1","SW_Push","Switch:SW_Push","Button_Switch_THT:SW_PUSH_6mm_H5mm","~",""
+"7","1","SW2","SW_SPST","Switch:SW_SPST","Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical","~",""
