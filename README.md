@@ -27,7 +27,7 @@ My initial plan was to use the ESP32's ADC & DAC simultaneous, but the I've run 
 2. even if both ADC & DAC could work in continuous DMA mode, the ADC configuration doesn't allow sampling frequencies below 20khz (for mSBC & CVSD codecs a lower sampling rate is required: 16khz, 8khz respectively)
 3. the ESP32 doesn't have an analog ground which makes both the ADC & DAC really noisy
 
-In a previous iteration of the project, both the Pico and the external DAC were connected to the ESP32 via SPI, but it struggled to keep a constant rate of sending/receiving PCM samples during an active call because each PCM sample required its own SPI transaction (both the Pico and the TLC5615 support only 2 byte transactions) - this cause horrible audio on both ends.
+In a previous iteration of the project, both the Pico and the external DAC were connected to the ESP32 via SPI, but it struggled to keep a constant rate of sending/receiving PCM samples during an active call because each PCM sample required its own SPI transaction (both the Pico and the TLC5615 support only 2 byte transactions) - this caused horrible audio on both ends.
 
 ## Audio transmission
 The Pico is configured as a slave I2C device receiving and transmitting audio data at the master's request (ESP32). Data is transmitted via a basic protocol built on top of I2C which consists of 5 commands. Each command is encoded as a 16 bit uint. The first 8 MSB encode the command code and the last 8 LSB encode any arguments the command might have.  
