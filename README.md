@@ -1,6 +1,6 @@
 ## British GPO 746 bluetooth conversion (HFP)
 
-Firmware and hardware related resources to add hands-free bluetooth support to a 746 british phone.
+Firmware and hardware related resources for adding hands-free bluetooth support to a 746 british phone.
 
 ## Hardware requirements
 
